@@ -75,6 +75,8 @@ def coordinator(hass):
     coordinator.robots["robot"] = RobotData("robot", "Neato", GEN3, connected=True)
     coordinator.async_command = AsyncMock(return_value={})
     coordinator.async_refresh_robot = AsyncMock()
+    coordinator.async_refresh_maps = AsyncMock()
+    coordinator.async_return_to_base = AsyncMock()
     return coordinator
 
 

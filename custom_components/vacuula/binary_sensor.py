@@ -169,6 +169,13 @@ def binary_value(
         )
     path = description.gen3_path if robot.generation == GEN3 else description.gen4_path
     value = value_at(robot.state, *path) if path else None
+    if key == "can_return_to_base":
+        pause = value_at(robot.state, path[0], "pause")
+        if value is True or pause is True:
+            return True
+        if value is False and pause is False:
+            return False
+        return None
     return value if isinstance(value, bool) else None
 
 

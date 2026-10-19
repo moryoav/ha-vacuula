@@ -1,6 +1,6 @@
 clean:
   name: Clean a map or zone
-  description: Start a cleaning run with explicit settings. Generation 3 supports one zone per action.
+  description: Start a cleaning run with explicit settings. Automatically uses the saved active map when available. Whole home explicitly ignores zones and no-go boundaries. Generation 3 supports one zone per action.
   fields:
     device_id: &device
       name: Robot
@@ -12,6 +12,19 @@ clean:
       name: Map ID
       selector:
         text:
+    cleaning_type:
+      name: Cleaning type
+      description: Auto uses an available active map. Map requires one. Whole home explicitly ignores maps and no-go boundaries. An explicit map ID takes precedence over Auto or Map.
+      default: auto
+      selector:
+        select:
+          options:
+            - label: Auto
+              value: auto
+            - label: Map
+              value: map
+            - label: Whole home
+              value: house
     zone_ids:
       name: Zone IDs
       description: Boundary IDs from the selected map. Leave empty to clean the whole map.
@@ -36,15 +49,22 @@ clean:
         boolean:
 set_schedule:
   name: Replace schedule
-  description: Replace all Generation 3 schedule events. This does not enable the schedule. An empty list removes all events.
+  description: Replace all Generation 3 schedule events. Local times use Home Assistant's configured timezone and its current UTC offset. Rewrite the schedule after a daylight saving time change. This does not enable the schedule. An empty list removes all events.
   fields:
     device_id: *device
     events:
       name: Events
       required: true
-      description: List of mode (1 eco, 2 turbo), day (0 Sunday to 6 Saturday), startTime (HH:MM), and optional boundaryId.
+      description: List of mode (1 eco, 2 turbo), day (0 Sunday to 6 Saturday), startTime (HH:MM), and optional boundaryId. Times and weekdays use the selected time basis.
       selector:
         object:
+    time_basis:
+      name: Time basis
+      description: Local uses Home Assistant's timezone. UTC accepts raw robot schedules, including schedules returned by get_data.
+      default: local
+      selector:
+        select:
+          options: [local, utc]
 update_schedule_event:
   name: Add or update schedule event
   description: Add or update a Generation 4 schedule event. Times use the robot's configured timezone.
@@ -105,7 +125,7 @@ delete_schedule_event:
         text:
 set_boundaries:
   name: Replace map boundaries
-  description: Replace the complete boundary list on a map. An empty list removes all boundaries. Use get_data to read the current boundaries first.
+  description: Replace the complete boundary list on a map. An empty list removes all boundaries. An active Generation 4 floorplan is promoted again to send the changes to the robot. Inactive maps stay inactive. Use get_data to read the current boundaries first.
   fields:
     device_id: *device
     map_id:
@@ -160,7 +180,7 @@ map_action:
           options: [promote, use, unuse, demote]
 get_data:
   name: Read robot data
-  description: Return structured robot data, maps, run history or boundaries for use in scripts. Requires a response variable.
+  description: Return structured robot data, maps, run history or boundaries for use in scripts. Generation 3 schedules use the robot's UTC clock. Requires a response variable.
   fields:
     device_id: *device
     resource:

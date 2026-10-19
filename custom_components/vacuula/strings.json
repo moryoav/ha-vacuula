@@ -70,6 +70,15 @@
     "map_required": {
       "message": "Provide a map ID for this action."
     },
+    "map_unavailable": {
+      "message": "No enabled or promoted saved map is available. Enable or promote a map in Vacuula, or deliberately choose whole home without a map."
+    },
+    "map_cleaning_requires_dock": {
+      "message": "Return the robot to its dock before starting mapped cleaning. To clean without no-go lines, deliberately choose whole home without a map."
+    },
+    "ambiguous_map": {
+      "message": "Several promoted maps were reported. Choose a map explicitly with the Vacuula clean action, or correct the promoted maps in Vacuula."
+    },
     "run_required": {
       "message": "Provide a run ID for this action."
     },
@@ -225,7 +234,9 @@
       "cleaning_category": {
         "name": "Cleaning type",
         "state": {
-          "house": "Whole home",
+          "auto": "Automatic (use saved map)",
+          "map": "Saved map",
+          "house": "Whole home without a map",
           "spot": "Spot"
         }
       },

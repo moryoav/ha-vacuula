@@ -23,7 +23,10 @@ the app source; this integration accepts only a single `boundaryId`.
 ## HTTP and events
 
 All paths below are relative to the configured origin. IDs occupy one URL path
-segment and are percent-encoded. The integration accepts only a plain HTTP or
+segment. Timestamp colons remain literal because the reviewed server matches
+raw paths without decoding them; slash, query, fragment and percent delimiters
+remain escaped. Real HTTP tests check the raw paths for timestamp map/run IDs.
+The integration accepts only a plain HTTP or
 HTTPS origin without user information, a path prefix, query, or fragment.
 Requests do not follow redirects. The direct app API requires no authentication;
 there is no integration support for an authenticated reverse proxy.
@@ -98,11 +101,38 @@ adds dimensions. Generation 4 `cleaning.start` uses `runs`, each containing
 `settings` and either `map: null` or a map object with `rank_id`, `track_id`, and
 `nogo_enabled`.
 
-Generation 3 preference writes merge the cached full preferences object before
+New runs use Automatic map selection by default. Before selecting a map the
+integration refreshes the stored map list. With saved maps, Gen3 uses category
+`4` and lets the robot match its dock against enabled maps, as the app does.
+Gen4 uses the unique promoted floorplan ID with `nogo_enabled: true`. A saved
+map that cannot safely be selected causes an action error; it never triggers
+a silent mapless fallback. Explicit house and spot controls remain mapless.
+
+Returning to base pauses a pausable run, waits 3.5 seconds and re-reads command
+readiness before sending the docking command. The entire sequence holds the
+robot lock; failed pause, state read or cancellation prevents the later command.
+
+Generation 3 preference writes read and merge the full preferences object under
+the same lock as the write before
 applying changed values. This avoids dropping unrelated preference fields.
 Generation 4 settings changes use the operation and keys defined by the app.
 Home Assistant cleaning defaults are stored in config-entry options and do not
-send a robot command until a cleaning action is requested.
+send a robot command until a cleaning action is requested. Each options change
+uses a new nested snapshot so Home Assistant invalidates its serialized entry
+and saves every change. Entry minor version 2 migrates old `house` defaults to
+`auto`; new explicit mapless choices are preserved.
+
+Gen3 `setSchedule` stores UTC weekly times. The integration converts local
+inputs using Home Assistant's configured timezone and the current UTC offset,
+including weekday rollover, matching the app's `utils/clockTime.ts` behavior.
+`time_basis: utc` accepts raw events without conversion. `get_data` keeps raw
+UTC schedule responses. A DST offset change requires rewriting local schedules.
+
+Gen4 HTTP boundary replacement stores data on the server. For an already
+promoted map, the integration saves then re-promotes it under one robot lock so
+the robot receives updated zones. Fresh map metadata determines active status;
+inactive maps stay inactive. Save failure prevents promotion, and promotion
+failure is reported even though the server may already have stored boundaries.
 
 Generation 3 map-enabled switches use the app's map update endpoint, preserving
 the cached map name. Generation 4 event-enabled switches send `scheduling.update`
@@ -122,14 +152,19 @@ keys to avoid collisions between nested fields.
 ## Timing, safety, and privacy
 
 The coordinator owns one server SSE task, one task per connected robot, and an
-independent 60-second polling timer. Details refresh every 300 seconds or after a
-command. Event reconnect delay doubles from 1 second to a 60-second cap.
-Optional commands rejected as unsupported are cached for the entry lifetime.
+independent 60-second polling timer. Details refresh every 300 seconds. Control
+commands read back state and only the setting or schedule they changed; map
+operations read back maps, and read-only data actions issue no extra queries.
+Event reconnect delay doubles from 1 second to a 60-second cap.
+Only explicit unsupported-command replies are cached for the entry lifetime;
+HTTP 404/405 and other transient robot responses are retried on later polls.
 Unloading cancels and awaits all event tasks and removes the timer; Home
 Assistant retains ownership of the shared HTTP session.
 
 Normal requests have a 45-second total timeout, a 10-second connect timeout, and
-a 40-second socket-read timeout. SSE has no total timeout, a 10-second connect
+a 40-second socket-read timeout. Map promotion uses 90 seconds total and an
+80-second socket-read timeout to exceed the server's 60-second robot wait.
+SSE has no total timeout, a 10-second connect
 timeout, and a 45-second socket-read timeout. JSON bodies are limited to 16 MiB
 and SSE frames to 2 MiB. Invalid JSON and non-finite JSON numbers are rejected.
 
@@ -144,6 +179,7 @@ action requires the literal boolean `confirm: true` and Generation 4.
 Map images validate dimensions, RLE runs, and a maximum of 4,194,304 pixels;
 rendering runs in Home Assistant's executor. No external image service is used.
 Diagnostics are built from cached, allowlisted telemetry, redact identities and
-URLs, and omit map geometry, run contents, and complete schedule events.
+URLs, include reviewed `details` and `meta` fields such as charge, docking and
+firmware, and omit map geometry, run contents, and complete schedule events.
 Structured `get_data` responses are intended for local automation and can
 contain richer private data.

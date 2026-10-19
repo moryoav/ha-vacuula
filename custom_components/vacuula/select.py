@@ -27,9 +27,7 @@ async def async_setup_entry(
 def create_entities(
     coordinator: VacuulaCoordinator, robot: RobotData
 ) -> list[VacuulaSelect]:
-    keys = ["cleaning_mode", "navigation_mode"]
-    if robot.generation == GEN3 and robot.capabilities.get("spotCleaning"):
-        keys.append("cleaning_category")
+    keys = ["cleaning_mode", "navigation_mode", "cleaning_category"]
     if robot.generation != GEN3 and robot.preferences.get("available_languages"):
         keys.append("robot_language")
     return [VacuulaSelect(coordinator, robot.serial, key) for key in keys]
@@ -54,7 +52,18 @@ class VacuulaSelect(VacuulaEntity, SelectEntity):
                 else ["normal", "gentle"]
             )
         if self.key == "cleaning_category":
-            return ["house", "spot"]
+            options = ["auto", "house"]
+            if (
+                self.robot.generation != GEN3
+                or self.robot.capabilities.get("maps")
+                or self.robot.maps
+            ):
+                options.append("map")
+            if self.robot.generation == GEN3 and self.robot.capabilities.get(
+                "spotCleaning"
+            ):
+                options.append("spot")
+            return options
         return [
             item
             for item in self.robot.preferences.get("available_languages", [])
@@ -75,7 +84,7 @@ class VacuulaSelect(VacuulaEntity, SelectEntity):
                 )
             return "normal"
         if self.key == "cleaning_category":
-            value = defaults.get("category", "house")
+            value = defaults.get("category", "auto")
         else:
             value = self.robot.preferences.get("language")
         return value if isinstance(value, str) and value in self.options else None

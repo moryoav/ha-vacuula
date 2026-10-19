@@ -1,6 +1,7 @@
 """Validated actions for maps, schedules and advanced Vacuula features."""
 
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 import probatio as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
@@ -15,11 +16,13 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.service import async_register_admin_service
+from homeassistant.util import dt as dt_util
 
 from .client import VacuulaError
 from .const import DOMAIN, GEN3, GEN4
 from .coordinator import VacuulaCoordinator
 from .data import RobotData, response_data
+from .vacuum import cleaning_target
 
 _IDENTIFIER = vol.All(
     str,
@@ -100,18 +103,27 @@ def _cleaning_settings(robot: RobotData, data: dict[str, Any]) -> tuple[str, str
     return mode, navigation
 
 
-def _clean_command(robot: RobotData, data: dict[str, Any]) -> dict[str, Any]:
+def _clean_command(
+    robot: RobotData, data: dict[str, Any], *, use_default_map: bool = False
+) -> dict[str, Any]:
     mode, navigation = _cleaning_settings(robot, data)
     map_id = data.get("map_id")
     zones = data.get("zone_ids", [])
     if zones and map_id is None:
         raise _error("map_required")
+    if map_id and data.get("cleaning_type") == "house":
+        raise _error("invalid_option")
+    target = (
+        cleaning_target(robot, data.get("cleaning_type", "auto"))
+        if use_default_map and map_id is None
+        else {}
+    )
     if robot.generation == GEN3:
         if len(zones) > 1:
             # Upstream marks Gen3 multi-boundary payloads unverified.
             raise _error("single_zone_only")
         params: dict[str, Any] = {
-            "category": 4 if map_id else 2,
+            "category": 4 if map_id else target.get("category", 2),
             "mode": {"eco": 1, "turbo": 2}[mode],
             "navigationMode": {"normal": 1, "extra_care": 2, "deep": 3}[navigation],
         }
@@ -121,6 +133,9 @@ def _clean_command(robot: RobotData, data: dict[str, Any]) -> dict[str, Any]:
             params["boundaryId"] = zones[0]
         return {"cmd": "startCleaning", "params": params}
     settings = {"mode": mode, "navigation_mode": navigation}
+    default_map = target.get("map")
+    if isinstance(default_map, dict):
+        default_map = {**default_map, "nogo_enabled": data.get("nogo_enabled", True)}
     runs = [
         {
             "map": {
@@ -129,12 +144,34 @@ def _clean_command(robot: RobotData, data: dict[str, Any]) -> dict[str, Any]:
                 "nogo_enabled": data.get("nogo_enabled", True),
             }
             if map_id
-            else None,
+            else default_map,
             "settings": settings,
         }
         for zone in zones or [None]
     ]
     return {"ability": "cleaning.start", "runs": runs}
+
+
+def _gen3_schedule_events(
+    hass: HomeAssistant, data: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Convert local weekly clock slots to the robot's UTC clock.
+
+    Match Vacuula's current-offset conversion. Gen3 stores a fixed UTC weekly
+    schedule, so local times must be written again after a DST offset change.
+    Explicit UTC input remains available for round-tripping raw robot data.
+    """
+    events: list[dict[str, Any]] = [dict(event) for event in data["events"]]
+    if data["time_basis"] == "utc":
+        return events
+    offset = dt_util.now(ZoneInfo(hass.config.time_zone)).utcoffset()
+    offset_minutes = int(offset.total_seconds() // 60) if offset else 0
+    for event in events:
+        hour, minute = map(int, event["startTime"].split(":"))
+        day_shift, utc_minutes = divmod(hour * 60 + minute - offset_minutes, 24 * 60)
+        event["day"] = (event["day"] + day_shift) % 7
+        event["startTime"] = f"{utc_minutes // 60:02d}:{utc_minutes % 60:02d}"
+    return events
 
 
 @callback
@@ -143,6 +180,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
     schemas: dict[str, dict[Any, Any]] = {
         "clean": {
             vol.Optional("map_id"): _IDENTIFIER,
+            vol.Optional("cleaning_type", default="auto"): vol.In(
+                ["auto", "map", "house"]
+            ),
             vol.Optional("zone_ids", default=[]): vol.All(
                 [_IDENTIFIER], vol.Length(max=20)
             ),
@@ -153,7 +193,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
             vol.Optional("nogo_enabled", default=True): bool,
         },
         "set_schedule": {
-            vol.Required("events"): vol.All([_GEN3_EVENT], vol.Length(max=100))
+            vol.Required("events"): vol.All([_GEN3_EVENT], vol.Length(max=100)),
+            vol.Optional("time_basis", default="local"): vol.In(["local", "utc"]),
         },
         "update_schedule_event": {
             vol.Optional("event_id"): _IDENTIFIER,
@@ -220,13 +261,19 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 # ownership using the per-robot map file before sending a write.
                 await coordinator.client.async_map(serial, data["map_id"])
             if action == "clean":
+                if "map_id" not in data and data["cleaning_type"] != "house":
+                    await coordinator.async_refresh_maps(serial)
                 result = await coordinator.async_command(
-                    serial, _clean_command(robot, data)
+                    serial, _clean_command(robot, data, use_default_map=True)
                 )
             elif action == "set_schedule":
                 _require_generation(robot, GEN3)
                 result = await coordinator.async_command(
-                    serial, {"cmd": "setSchedule", "params": {"events": data["events"]}}
+                    serial,
+                    {
+                        "cmd": "setSchedule",
+                        "params": {"events": _gen3_schedule_events(hass, data)},
+                    },
                 )
             elif action == "update_schedule_event":
                 _require_generation(robot, GEN4)
@@ -277,12 +324,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                         },
                     )
                 else:
-                    result = await coordinator.async_map_operation(
-                        serial,
-                        data["map_id"],
-                        "boundaries",
-                        data["boundaries"],
+                    result = await coordinator.async_set_map_boundaries(
+                        serial, data["map_id"], data["boundaries"]
                     )
+                    await coordinator.async_refresh_maps(serial)
             elif action == "rename_robot":
                 await coordinator.client.async_update_robot(serial, data["name"])
                 robot.name = data["name"]
@@ -290,8 +335,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 dr.async_get(hass).async_update_device(
                     data["device_id"], name=data["name"]
                 )
+                coordinator.async_set_updated_data(coordinator.robots)
             elif action == "update_map":
-                await coordinator.client.async_update_map(
+                await coordinator.async_update_map(
                     serial, data["map_id"], data["name"], data["enabled"]
                 )
                 result = {}
@@ -309,8 +355,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 )
             else:
                 return {"data": await _get_data(coordinator, robot, data)}
-            if action in {"set_boundaries", "rename_robot", "update_map", "map_action"}:
-                await coordinator.async_refresh_robot(serial, full=True)
+            if action == "map_action":
+                await coordinator.async_refresh_maps(serial)
             return {"response": result}
         except VacuulaError as err:
             raise HomeAssistantError(
@@ -349,6 +395,7 @@ async def _get_data(
                 await coordinator.async_command(
                     serial,
                     {"cmd": "getMapBoundaries", "params": {"mapId": data["map_id"]}},
+                    refresh=False,
                 )
             )
         return await coordinator.client.async_map_boundaries(serial, data["map_id"])
@@ -383,5 +430,6 @@ async def _get_data(
                     robot.generation
                 ][resource]
             },
+            refresh=False,
         )
     )

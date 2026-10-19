@@ -72,6 +72,7 @@ async def test_single_server_uses_advertised_port(hass, search, api):
     assert result["data"] == {
         "url": "http://192.0.2.1:8099",
         "robot_ids": ["NEW-robot"],
+        "url_aliases": ["http://192.0.2.1:8099", "http://vacuula.local:8099"],
     }
     assert result["result"].unique_id == "http://192.0.2.1:8099"
 

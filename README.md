@@ -67,7 +67,7 @@ or generation. Diagnostic controls may need enabling in the entity registry.
 | Binary sensors | Server-observed robot connection; charging, docked, and problem state; Generation 3 dustbin state; reported command readiness. Optional Generation 4 quickboost and cleaning-center telemetry and additional reported boolean diagnostics appear when present. |
 | Buttons | Start/resume, stop, pause, return to base, locate, and refresh; supported Generation 3 spot cleaning, mapping exploration, dismiss alert, and diagnostic log upload. Log upload and other maintenance controls may be disabled by default. |
 | Switches | Generation 3 robot sounds, schedule enabled state, and one enabled toggle per saved map; Generation 4 force-floorplan preference and one enabled toggle per existing schedule event. |
-| Selects | Cleaning mode and navigation defaults; Generation 3 house/spot default when spot cleaning is supported; Generation 4 language from the robot's advertised choices. |
+| Selects | Cleaning mode, navigation and cleaning type defaults: Automatic, saved map, or explicit whole-home cleaning without a map; supported Generation 3 spot cleaning; Generation 4 language from the robot's advertised choices. |
 | Numbers | Generation 3 bin reminder (30–150 minutes), filter reminder (30–90 days), brush reminder (120–240 days), and supported spot width/height (100–400 cm). |
 | Images | One locally rendered PNG per stored floor map. |
 
@@ -76,6 +76,24 @@ returning to base, locating the robot, and selecting a cleaning mode. Additional
 controls cover generation-specific schedules, preferences, spot cleaning,
 mapping, and maintenance actions. Cleaning defaults stored by Home Assistant do
 not start a run when changed.
+
+New runs default to **Automatic (use saved map)**. Before starting, the
+integration reads the current saved-map list. With saved maps, Generation 3
+uses the robot's dock matching against enabled maps; Generation 4 uses the
+single promoted floorplan with no-go areas enabled. A mapped start requires
+the robot to be docked. Disabled maps, missing active maps, ambiguous Generation
+4 floorplans or failed map reads cause an action error instead of a mapless run.
+With no saved maps, Automatic starts ordinary whole-home cleaning.
+
+**Whole home without a map** is an explicit choice that ignores saved zones and
+no-go lines. Spot cleaning also runs without the saved map. Upgrading from
+0.1.0 or 0.1.1 changes an old saved `house` default to Automatic, preserving
+mode, navigation, spot dimensions and other settings. If mapless cleaning is
+intended, select it again after upgrading. Resuming continues the existing run.
+
+Returning to base during cleaning pauses the run, waits 3.5 seconds and checks
+the robot's latest command readiness before sending it home. The sequence is
+serialized so another action cannot interrupt the pause-to-home transition.
 
 Additional scalar diagnostics cover robot state, general information, cleaning
 statistics, the current subrun, the latest dated run, and its latest subrun.
@@ -111,26 +129,34 @@ context. Standard vacuum entity controls use the usual entity permissions.
 
 | Action | Fields besides `device_id` | Generation and behavior |
 | --- | --- | --- |
-| `vacuula.clean` | Optional `map_id`, `zone_ids`, `mode`, `navigation`, `nogo_enabled` | Both. Starts cleaning; zones require a map. Generation 3 accepts at most one zone. |
-| `vacuula.set_schedule` | Required `events` | Generation 3. Replaces every schedule event; `[]` clears them. Does not enable the schedule. |
+| `vacuula.clean` | Optional `map_id`, `cleaning_type`, `zone_ids`, `mode`, `navigation`, `nogo_enabled` | Both. Starts cleaning, automatically using saved maps by default; zones require a map. Generation 3 accepts at most one zone. |
+| `vacuula.set_schedule` | Required `events`; optional `time_basis` | Generation 3. Replaces every schedule event; `[]` clears them. Times default to Home Assistant local time. Does not enable the schedule. |
 | `vacuula.update_schedule_event` | Required `enabled`, `days`, `time`; optional `event_id` and cleaning fields | Generation 4. Adds an event or updates an existing ID. |
 | `vacuula.delete_schedule_event` | Required `event_id` | Generation 4. Deletes one event. |
-| `vacuula.set_boundaries` | Required `map_id`, `boundaries` | Both. Replaces the complete boundary list; `[]` removes all boundaries. Read and preserve existing boundaries first. |
+| `vacuula.set_boundaries` | Required `map_id`, `boundaries` | Both. Replaces the complete boundary list; `[]` removes all boundaries. Generation 4 re-promotes an active map after saving so the robot receives the new zones. Inactive maps stay inactive. Read and preserve existing boundaries first. |
 | `vacuula.rename_robot` | Required `name` | Both. Changes the name stored by Vacuula. |
 | `vacuula.update_map` | Required `map_id`, `name`, `enabled` | Both. Changes the map name; `enabled` applies to Generation 3 maps. |
 | `vacuula.map_action` | Required `map_id`, `action` | Generation 4. `promote`, `use`, `unuse`, or `demote`; demotion removes active floorplan status. |
 | `vacuula.get_data` | Required `resource`; conditional `map_id` or `run_id` | Both. Returns `data` and requires a response variable. See resources below. |
 | `vacuula.factory_reset` | Required `confirm: true` | Generation 4 only. Erases robot settings and may require provisioning again. `false` is rejected. |
 
-Cleaning fields default to `mode: eco`, `navigation: normal`, and
+Cleaning fields default to `cleaning_type: auto`, `mode: eco`, `navigation: normal`, and
 `nogo_enabled: true`. Generation 3 modes are `eco` and `turbo`; navigation is
 `normal`, `extra_care`, or `deep`. Generation 4 supports `normal` or `gentle`
 navigation and, for applicable models, `auto` or `max` cleaning. At most 20 zones
 can be supplied to a Generation 4 action. No-go selection is a Generation 4
-cleaning option.
+cleaning option. Without `map_id`, `cleaning_type: auto` follows the same safe
+map selection as the vacuum entity. `cleaning_type: map` requires a saved map;
+`cleaning_type: house` explicitly requests mapless cleaning. A `map_id` selects
+a specific map and cannot be combined with `cleaning_type: house`.
 
 Generation 3 schedule events contain `mode` (`1` eco, `2` turbo), `day` (`0`
 Sunday through `6` Saturday), `startTime` (`HH:MM`), and optional `boundaryId`.
+`set_schedule` interprets these times in Home Assistant's configured timezone
+and converts time and weekday to the robot's UTC clock. Use `time_basis: utc`
+when supplying raw UTC events, including events read by `get_data`. The robot
+stores fixed UTC weekly times: write a local-time schedule again after a DST
+offset change to keep the same local clock time, matching Vacuula's behavior.
 Generation 4 events use `days` from `mon` through `sun` and `time: HH:MM` in the
 robot's configured timezone. Up to 100 Generation 3 schedule events are accepted.
 
@@ -176,8 +202,13 @@ data:
 Server-sent events (SSE) track the robot list and state changes. Each connected
 robot has its own event stream. An independent 60-second timer reads server and
 robot state even while events are arriving. Optional details, preferences,
-schedules, map lists, and run lists are refreshed about every five minutes and
-after commands. Map PNGs are fetched on demand and cached for five minutes.
+schedules, map lists, and run lists are refreshed about every five minutes.
+Control commands read back state and only the setting or schedule they changed.
+Map changes refresh the map list. Read-only `get_data` calls return their
+requested resource without triggering other reads. Map PNGs are fetched on
+demand and cached for five minutes. Optional reads with transient errors,
+including 404 responses while idle, are retried on later detail polls; only
+explicit unsupported-command responses disable a query until reload.
 
 Event streams reconnect with backoff from 1 to 60 seconds. The independent
 polling timer recovers missed events and discovers newly added robots. A robot

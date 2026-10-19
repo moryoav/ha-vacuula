@@ -27,7 +27,13 @@ class LocalServer:
         self.client.async_robots = AsyncMock(side_effect=lambda: deepcopy(self.robots))
         self.client.async_command = AsyncMock(side_effect=self.command)
         self.client.async_maps = AsyncMock(
-            return_value=[{"id": "floor", "name": "Downstairs", "enabled": True}]
+            return_value=[
+                {
+                    "id": "floor",
+                    "name": "Downstairs",
+                    **({"enabled": True} if generation == GEN3 else {"promoted": True}),
+                }
+            ]
         )
         self.client.async_runs = AsyncMock(side_effect=self.runs)
         self.client.async_map = AsyncMock(
@@ -66,7 +72,7 @@ class LocalServer:
                 "availableCommands": {
                     "start": True,
                     "stop": True,
-                    "pause": True,
+                    "pause": False,
                     "resume": False,
                     "goToBase": True,
                 },
@@ -99,7 +105,7 @@ class LocalServer:
                 "available_commands": {
                     "start": True,
                     "cancel": True,
-                    "pause": True,
+                    "pause": False,
                     "resume": False,
                     "return_to_base": True,
                 },
@@ -149,6 +155,8 @@ class LocalServer:
         gen3 = self.robots[serial]["type"] == GEN3
         command = payload.get("cmd") if gen3 else payload.get("ability")
         state = self.state[serial]
+        flags = state["availableCommands" if gen3 else "available_commands"]
+        home_flag = "goToBase" if gen3 else "return_to_base"
         if command in {"getRobotState", "state.show"}:
             value = state
         elif command in {"getGeneralInfo", "info.robot"}:
@@ -193,23 +201,22 @@ class LocalServer:
                     state=2 if gen3 else "busy", action=1 if gen3 else "cleaning"
                 )
                 state["details"]["isDocked" if gen3 else "is_docked"] = False
-                state["availableCommands" if gen3 else "available_commands"][
-                    "resume"
-                ] = False
+                flags.update(resume=False, pause=True)
+                flags[home_flag] = False
             elif command in {"pauseCleaning", "cleaning.pause"}:
                 state["state"] = 3 if gen3 else "paused"
-                state["availableCommands" if gen3 else "available_commands"][
-                    "resume"
-                ] = True
+                flags.update(resume=True, pause=False)
+                flags[home_flag] = True
             elif command in {"sendToBase", "navigation.return_to_base"}:
                 state.update(
                     state=2 if gen3 else "busy", action=4 if gen3 else "docking"
                 )
+                flags.update(pause=False, resume=False)
+                flags[home_flag] = False
             elif command in {"stopCleaning", "cleaning.cancel"}:
                 state.update(state=1 if gen3 else "idle", action=0 if gen3 else "idle")
-                state["availableCommands" if gen3 else "available_commands"][
-                    "resume"
-                ] = False
+                flags.update(resume=False, pause=False)
+                flags[home_flag] = True
         if gen3:
             return {"result": "ok", "data": deepcopy(value)}
         return {"code": 200, "body": deepcopy(value)}
@@ -347,9 +354,14 @@ async def test_native_button_services_share_confirmed_vacuum_actions(hass, loade
         commands = [
             call.args[1] for call in server.client.async_command.await_args_list
         ]
-        assert (
-            commands[0].get("cmd") or commands[0].get("ability")
-        ) == expected_command
+        if action == "return_to_base":
+            assert (commands[0].get("cmd") or commands[0].get("ability")) == (
+                "pauseCleaning" if gen3 else "cleaning.pause"
+            )
+        else:
+            assert (
+                commands[0].get("cmd") or commands[0].get("ability")
+            ) == expected_command
         assert (
             sum(
                 (item.get("cmd") or item.get("ability")) == expected_command

@@ -1,13 +1,13 @@
 # Local validation, 19 October 2026
 
-Integration version: **0.1.1**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.2**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
 
 ## Automated checks
 
-- **305 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference writes and manual setup discovery.
-- **99.79% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.80%**. Configuration flow and discovery helper coverage are **100%**.
+- **464 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference writes, manual setup discovery and the protocol/state regressions below.
+- **99.75% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.96%**. Configuration flow and discovery helper coverage are **100%**.
 - Strict mypy: **passed**, all 19 modules.
-- Ruff lint and formatting: **passed**, all 37 Python source, test and smoke-check files.
+- Ruff lint and formatting: **passed**, all 45 Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
 
 Run from the source folder on this development machine:
@@ -58,6 +58,28 @@ Manual setup browses `_vacuula._tcp.local.` for three seconds using Home Assista
 All 25 files in the 0.1.1 installation matched the tested source by SHA-256. Configuration validation passed and Home Assistant was restarted to load the update. The existing Vacuula entry returned to **loaded**.
 
 A real manually initiated setup found the existing local server in **3.01 seconds** and returned **already_configured**, with **no address form**. The existing entry was retained. Successful confirmation for a new server and multiple-server selection are covered by the config-flow tests. The app was not modified and no movement or robot-setting command was sent.
+
+## Protocol and state regressions, 0.1.2
+
+The fixes were checked against the same Vacuula 1.0.0 source revision, `bf18585`.
+
+| Behavior | Regression evidence |
+| --- | --- |
+| Timestamp map/run IDs | Real HTTP requests assert literal timestamp colons in raw paths for reads, writes and boundary routes; path delimiters remain escaped. |
+| Cleaning defaults | Repeated edits are saved through Home Assistant's actual entry store, read back and loaded into a new coordinator; unrelated options and earlier snapshots remain intact. |
+| Saved-map cleaning | Both generations' command payloads use enabled/promoted maps and no-go lines, including maps created after the previous cache refresh. Disabled, ambiguous or unavailable maps fail closed. Explicit mapless/spot choices remain available. |
+| Safe upgrade | Minor version 2 migrates old house defaults to Automatic while preserving other choices and settings; new explicit mapless choices survive. |
+| Return to base | Both generations pause, wait 3.5 seconds, read readiness and dock under one lock. Failure and cancellation tests prevent the later command; concurrent commands cannot interleave. Button and readiness sensors match the new capability. |
+| Gen3 schedule clock | Local-to-UTC conversion covers summer/winter offsets, half-hour zones, midnight and weekday rollover. Explicit UTC input remains unchanged. Fixed UTC schedules need rewriting after a DST offset change. |
+| Gen4 boundaries | Fresh map metadata decides whether promotion is needed. Active maps save then promote under one lock; inactive maps stay inactive. Save/promotion errors and concurrent commands are tested. |
+| Promotion wait | The promotion request uses 90 seconds total and 80 seconds read time, beyond the server's 60-second acknowledgement wait. |
+| Vacuum and optional telemetry | Busy mapping/maintenance states have HA activity; transient 404/405/503 optional reads recover, while explicit unsupported commands remain suppressed. |
+| Empty server identity | Hostname/IP aliases and bounded shared-resolver lookups prevent duplicates without matching unrelated server versions, ports or conflicting endpoints. |
+| Diagnostics and readbacks | Allowlisted details/meta preserve charge, docking, charging, model and firmware without identity leakage or I/O. Read-only data actions do not fan out; controls refresh only state and changed resources. |
+
+These behaviors were tested with mocked robot transports; only the raw HTTP routing test uses a local test server. No movement, schedule, boundary, preference or reset command was sent to the physical robot during this work.
+
+All 25 installed 0.1.2 files matched the tested source by SHA-256. Home Assistant configuration validation passed before and after installation. After one restart, the existing entry was **loaded**, its persisted schema was **version 1 / minor version 2**, and the D5 remained connected. A real diagnostics download identified runtime **0.1.2** and included charge, docked, charging and firmware fields without the actual robot serial. The Vacuula app was not modified.
 
 ## Quality target
 

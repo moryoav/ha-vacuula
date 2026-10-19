@@ -1,18 +1,26 @@
 """UI setup, network discovery and reconfiguration for Vacuula."""
 
+import asyncio
+from ipaddress import ip_address
 from typing import Any
 
 import probatio as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import (
+    HomeAssistantTCPConnector,
+    async_get_clientsession,
+)
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from yarl import URL
 
 from .client import VacuulaClient, VacuulaError
 from .const import CONF_URL, DEFAULT_URL, DOMAIN
 from .discovery import async_discover_servers
+
+CONF_URL_ALIASES = "url_aliases"
+IDENTITY_RESOLVE_TIMEOUT = 2.0
 
 
 def normalize_url(value: str) -> str:
@@ -28,7 +36,7 @@ def normalize_url(value: str) -> str:
         or url.path not in {"", "/"}
     ):
         raise ValueError("Enter the server's HTTP or HTTPS origin")
-    return str(url.origin())
+    return str(url.origin().with_host(url.host.rstrip(".")))
 
 
 def discovery_url(discovery_info: ZeroconfServiceInfo) -> str:
@@ -47,14 +55,59 @@ def discovery_url(discovery_info: ZeroconfServiceInfo) -> str:
     )
 
 
+def discovery_aliases(discovery_info: ZeroconfServiceInfo) -> set[str]:
+    """Use the hostname and all addresses for the advertised scheme and port."""
+    origin = URL(discovery_url(discovery_info))
+    hosts = [discovery_info.hostname.rstrip("."), *discovery_info.addresses]
+    return {normalize_url(str(origin.with_host(host))) for host in hosts if host} | {
+        str(origin)
+    }
+
+
+def entry_aliases(entry: config_entries.ConfigEntry) -> set[str]:
+    """Accept old entries without aliases and ignore malformed optional values."""
+    result = set()
+    aliases = entry.data.get(CONF_URL_ALIASES, [])
+    for value in [
+        entry.data.get(CONF_URL),
+        *(aliases if isinstance(aliases, list) else []),
+    ]:
+        if isinstance(value, str):
+            try:
+                result.add(normalize_url(value))
+            except ValueError, TypeError:
+                continue
+    return result
+
+
+def _ip_origin(value: str) -> bool:
+    """Return whether an origin contains a numeric address."""
+    try:
+        ip_address(URL(value).host or "")
+    except ValueError:
+        return False
+    return True
+
+
+def _shared_aliases(base_url: str, aliases: set[str], configured: set[str]) -> set[str]:
+    """Do not identify conflicting numeric endpoints by a shared hostname alone."""
+    shared = aliases & configured
+    if _ip_origin(base_url) and any(_ip_origin(url) for url in configured):
+        return {url for url in shared if _ip_origin(url)}
+    return shared
+
+
 class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure one server, automatically discovering its robots."""
 
     VERSION = 1
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         self._discovered_url: str | None = None
         self._discovered_servers: dict[str, ZeroconfServiceInfo] = {}
+        self._discovered_aliases: set[str] = set()
+        self._resolved_urls: dict[str, set[str]] = {}
 
     async def _validate(self, base_url: str) -> tuple[dict[str, Any], list[str]]:
         client = VacuulaClient(async_get_clientsession(self.hass), base_url)
@@ -62,12 +115,83 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         robots = await client.async_robots()
         return info, sorted(robots)
 
-    def _duplicate(self, base_url: str, robot_ids: list[str]) -> bool:
-        return any(
-            entry.data.get(CONF_URL) == base_url
-            or bool(set(entry.data.get("robot_ids", [])) & set(robot_ids))
+    async def _async_resolve_urls(self, base_url: str) -> set[str]:
+        """Resolve only when aliases cannot already establish server identity."""
+        if base_url in self._resolved_urls:
+            return self._resolved_urls[base_url]
+        origin = URL(base_url)
+        result = {base_url}
+        assert origin.host is not None
+        try:
+            ip_address(origin.host)
+        except ValueError:
+            connector = async_get_clientsession(self.hass).connector
+            if isinstance(connector, HomeAssistantTCPConnector):
+                try:
+                    async with asyncio.timeout(IDENTITY_RESOLVE_TIMEOUT):
+                        addresses = await connector.async_resolve_host(origin.host)
+                    result.update(
+                        normalize_url(str(origin.with_host(address["host"])))
+                        for address in addresses
+                    )
+                except OSError, TimeoutError:
+                    pass
+        self._resolved_urls[base_url] = result
+        return result
+
+    async def _async_duplicate(
+        self,
+        base_url: str,
+        robot_ids: list[str],
+        aliases: set[str],
+        *,
+        ignore_entry_id: str | None = None,
+    ) -> config_entries.ConfigEntry | None:
+        """Match robot identity or the same endpoint, including legacy hostnames."""
+        entries = [
+            entry
             for entry in self._async_current_entries()
-        )
+            if entry.entry_id != ignore_entry_id
+        ]
+        for entry in entries:
+            matching_urls = _shared_aliases(base_url, aliases, entry_aliases(entry))
+            if matching_urls or set(entry.data.get("robot_ids", [])) & set(robot_ids):
+                return entry
+        origin = URL(base_url)
+        for entry in entries:
+            other_url = entry.data.get(CONF_URL)
+            if not isinstance(other_url, str):
+                continue
+            other = URL(other_url)
+            if (origin.scheme, origin.port) != (other.scheme, other.port):
+                continue
+            candidate_urls = await self._async_resolve_urls(base_url)
+            configured_urls = await self._async_resolve_urls(other_url)
+            matching_urls = _shared_aliases(
+                base_url,
+                aliases | candidate_urls,
+                entry_aliases(entry) | configured_urls,
+            )
+            if matching_urls:
+                aliases.update(candidate_urls | configured_urls)
+                return entry
+        return None
+
+    def _remember_aliases(
+        self,
+        entry: config_entries.ConfigEntry,
+        aliases: set[str],
+        robot_ids: list[str] | None = None,
+    ) -> None:
+        """Enrich legacy entries when discovery verifies their alternate origins."""
+        data = {
+            **entry.data,
+            CONF_URL_ALIASES: sorted(entry_aliases(entry) | aliases),
+        }
+        if robot_ids:
+            data["robot_ids"] = robot_ids
+        if data != entry.data:
+            self.hass.config_entries.async_update_entry(entry, data=data)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -78,9 +202,11 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for server in await async_discover_servers(self.hass):
                 try:
                     base_url = discovery_url(server)
+                    aliases = discovery_aliases(server)
                 except ValueError, TypeError:
                     continue
-                if self._duplicate(base_url, []):
+                if entry := await self._async_duplicate(base_url, [], aliases):
+                    self._remember_aliases(entry, aliases)
                     found_configured = True
                     continue
                 self._discovered_servers[base_url] = server
@@ -134,16 +260,22 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, base_url: str, robot_ids: list[str]
     ) -> config_entries.ConfigFlowResult:
         """Recheck duplicates immediately before creating the entry."""
-        if self._duplicate(base_url, robot_ids):
+        aliases = (
+            set(self._discovered_aliases)
+            if base_url == self._discovered_url
+            else {base_url}
+        )
+        if entry := await self._async_duplicate(base_url, robot_ids, aliases):
+            self._remember_aliases(entry, aliases, robot_ids)
             return self.async_abort(reason="already_configured")
         await self.async_set_unique_id(
             base_url, raise_on_progress=self.source != config_entries.SOURCE_USER
         )
         self._abort_if_unique_id_configured()
-        return self.async_create_entry(
-            title="Vacuula",
-            data={CONF_URL: base_url, "robot_ids": robot_ids},
-        )
+        data: dict[str, Any] = {CONF_URL: base_url, "robot_ids": robot_ids}
+        if len(aliases) > 1:
+            data[CONF_URL_ALIASES] = sorted(aliases)
+        return self.async_create_entry(title="Vacuula", data=data)
 
     async def async_step_zeroconf(
         self, discovery_info: ZeroconfServiceInfo
@@ -151,28 +283,28 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         host = discovery_info.host
         try:
             self._discovered_url = discovery_url(discovery_info)
+            self._discovered_aliases = discovery_aliases(discovery_info)
             _, robot_ids = await self._validate(self._discovered_url)
         except ValueError, TypeError, VacuulaError:
             return self.async_abort(reason="cannot_connect")
-        if self._duplicate(self._discovered_url, robot_ids):
-            for entry in self._async_current_entries():
-                if entry.data.get(CONF_URL) != self._discovered_url and set(
-                    entry.data.get("robot_ids", [])
-                ) & set(robot_ids):
-                    self.hass.config_entries.async_update_entry(
-                        entry,
-                        unique_id=self._discovered_url,
-                        data={
-                            **entry.data,
-                            CONF_URL: self._discovered_url,
-                            "robot_ids": robot_ids,
-                        },
-                    )
-                    if entry.state in {
-                        ConfigEntryState.LOADED,
-                        ConfigEntryState.SETUP_RETRY,
-                    }:
-                        await self.hass.config_entries.async_reload(entry.entry_id)
+        if entry := await self._async_duplicate(
+            self._discovered_url, robot_ids, self._discovered_aliases
+        ):
+            address_changed = entry.data.get(CONF_URL) != self._discovered_url and bool(
+                set(entry.data.get("robot_ids", [])) & set(robot_ids)
+            )
+            self._remember_aliases(entry, self._discovered_aliases, robot_ids)
+            if address_changed:
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    unique_id=self._discovered_url,
+                    data={**entry.data, CONF_URL: self._discovered_url},
+                )
+                if entry.state in {
+                    ConfigEntryState.LOADED,
+                    ConfigEntryState.SETUP_RETRY,
+                }:
+                    await self.hass.config_entries.async_reload(entry.entry_id)
             return self.async_abort(reason="already_configured")
         await self.async_set_unique_id(
             self._discovered_url,
@@ -216,23 +348,27 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except VacuulaError:
                 errors["base"] = "cannot_connect"
             else:
-                if any(
-                    other.entry_id != entry.entry_id
-                    and (
-                        other.data.get(CONF_URL) == base_url
-                        or bool(set(other.data.get("robot_ids", [])) & set(robot_ids))
-                    )
-                    for other in self._async_current_entries()
+                aliases = {base_url}
+                if await self._async_duplicate(
+                    base_url, robot_ids, aliases, ignore_entry_id=entry.entry_id
                 ):
                     return self.async_abort(reason="already_configured")
                 old_ids = set(entry.data.get("robot_ids", []))
                 if old_ids and robot_ids and not old_ids.intersection(robot_ids):
                     errors["base"] = "wrong_server"
                 else:
+                    if old_ids.intersection(robot_ids) or base_url in entry_aliases(
+                        entry
+                    ):
+                        aliases.update(entry_aliases(entry))
                     return self.async_update_reload_and_abort(
                         entry,
                         unique_id=base_url,
-                        data_updates={CONF_URL: base_url, "robot_ids": robot_ids},
+                        data_updates={
+                            CONF_URL: base_url,
+                            "robot_ids": robot_ids,
+                            CONF_URL_ALIASES: sorted(aliases),
+                        },
                     )
         return self.async_show_form(
             step_id="reconfigure",

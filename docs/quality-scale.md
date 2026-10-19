@@ -20,10 +20,10 @@ These statuses are a development checklist, subject to independent review.
 | Local asynchronous transport | `client.py` uses asynchronous HTTP and SSE with the Home Assistant-managed `aiohttp` session injected by setup and the config flow. |
 | Setup | `config_flow.py` searches for advertised servers during manual setup, validates the server and robot list, normalizes URL origins, prevents duplicate URLs or robots, supports Zeroconf and reconfiguration, and updates known server URLs on rediscovery. `discovery.py` uses the shared Home Assistant mDNS instance with bounded browsing and complete task cleanup. |
 | Lifecycle | Typed config-entry runtime data owns the coordinator. Setup performs a first refresh; unload removes the polling timer and cancels and awaits streams. |
-| Updates | Independent 60-second polling, server and per-robot event streams, five-minute optional detail/resource caches, per-robot locks, and bounded reconnect backoff. |
+| Updates | Independent 60-second polling, server and per-robot event streams, five-minute optional detail/resource caches, targeted command readbacks, per-robot locks, and bounded reconnect backoff. Transient optional-read errors do not disable later polls. |
 | Entities | Named controls plus optional scalar diagnostics for state, information, statistics, current and latest runs/subruns. Extra telemetry is read-only and disabled by default. Maps and schedule events dynamically add configuration switches that preserve existing names or commands. |
-| Actions | Ten globally registered administrator actions, explicit schemas and generation checks, translated errors, no raw command passthrough, and no automatic command retries. |
-| Diagnostics | Cached allowlisted telemetry; server URL, robot identities, maps, and complete schedule contents are excluded. No diagnostic network requests. |
+| Actions | Ten globally registered administrator actions, explicit schemas and generation checks, translated errors, safe mapped-cleaning defaults, atomic pause/dock and Gen4 boundary upload sequences, local-to-UTC Gen3 schedules, no raw command passthrough, and no automatic command retries. |
+| Diagnostics | Cached allowlisted telemetry including reviewed details/meta fields; server URL, robot identities, maps, and complete schedule contents are excluded. No diagnostic network requests. |
 | Documentation | README includes installation/removal, setup fields, entities, all actions, examples, data updates, supported generations, limitations, and troubleshooting. Protocol notes identify the reviewed API and validation limits. |
 
 ## Verification boundary
@@ -32,8 +32,8 @@ The test environment pins **Home Assistant 2026.10.2**, Python 3.14, and
 `pytest-homeassistant-custom-component` in `requirements_test.txt`. Tests cover
 the client, config flow, coordinator, integration lifecycle, actions, images,
 diagnostics, and regression cases. The [local validation](local-validation.md)
-records 305 passing tests, 99.79% combined line and branch coverage, at least
-98.80% in every module, complete config-flow coverage, and clean strict mypy
+records 464 passing tests, 99.75% combined line and branch coverage, at least
+98.96% in every module, complete config-flow coverage, and clean strict mypy
 results for all 19 integration modules. Local coverage rules are marked `done`.
 The strict-typing rule remains `todo` for separate client packaging and formal
 Core registration.

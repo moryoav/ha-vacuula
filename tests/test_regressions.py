@@ -162,13 +162,13 @@ async def test_malformed_and_unrelated_events_preserve_state(
     updated.assert_not_called()
 
 
-async def test_optional_unsupported_http_status_is_cached(resource_coordinator):
+async def test_optional_missing_response_is_retried(resource_coordinator):
     coordinator = resource_coordinator
     robot = RobotData("TEST-robot", "Neato", GEN3, True)
     coordinator.client.async_command.side_effect = VacuulaError("missing", status=404)
     assert await coordinator._async_optional(robot, "getLocalStats") is None
     assert await coordinator._async_optional(robot, "getLocalStats") is None
-    coordinator.client.async_command.assert_awaited_once()
+    assert coordinator.client.async_command.await_count == 2
 
 
 async def test_optional_detail_failure_preserves_cached_metadata(resource_coordinator):
@@ -300,12 +300,12 @@ async def test_server_map_settings_update_and_refresh_while_robot_offline(
     coordinator = resource_coordinator
     coordinator.robots = {"TEST-robot": RobotData("TEST-robot", "Neato", GEN3, False)}
     coordinator.client.async_update_map = AsyncMock()
-    with patch.object(coordinator, "async_refresh_robot", new=AsyncMock()) as refresh:
+    with patch.object(coordinator, "async_refresh_maps", new=AsyncMock()) as refresh:
         await coordinator.async_update_map("TEST-robot", "floor", "Downstairs", False)
     coordinator.client.async_update_map.assert_awaited_once_with(
         "TEST-robot", "floor", "Downstairs", False
     )
-    refresh.assert_awaited_once_with("TEST-robot", full=True)
+    refresh.assert_awaited_once_with("TEST-robot")
     coordinator.client.async_command.assert_not_awaited()
 
 
@@ -355,7 +355,15 @@ async def test_rediscovery_updates_same_robots_without_duplicate(hass, state):
         )
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "already_configured"
-    assert entry.data == {"url": "http://192.0.2.1:81", "robot_ids": ["TEST-robot"]}
+    assert entry.data == {
+        "url": "http://192.0.2.1:81",
+        "robot_ids": ["TEST-robot"],
+        "url_aliases": [
+            "http://192.0.2.1:81",
+            "http://old.local:81",
+            "http://vacuula.local:81",
+        ],
+    }
     assert entry.unique_id == "http://192.0.2.1:81"
     if state is ConfigEntryState.NOT_LOADED:
         reload.assert_not_awaited()

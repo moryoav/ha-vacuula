@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from contextlib import aclosing, suppress
+from copy import deepcopy
 from datetime import timedelta
 from time import monotonic
 from typing import Any
@@ -224,35 +225,37 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         try:
             return response_data(await self.client.async_command(robot.serial, payload))
         except VacuulaError as err:
-            if isinstance(err, UnsupportedCommand) or getattr(err, "status", None) in (
-                404,
-                405,
-                501,
-            ):
+            if isinstance(err, UnsupportedCommand):
                 self._unsupported.add((robot.serial, command))
             return None
+
+    async def _async_read_state_locked(self, robot: RobotData) -> bool:
+        """Read state while the caller owns the robot lock."""
+        try:
+            command = (
+                {"cmd": "getRobotState"}
+                if robot.generation == GEN3
+                else {"ability": "state.show"}
+            )
+            robot.state = response_data(
+                await self.client.async_command(robot.serial, command)
+            )
+            self._update_capabilities(robot)
+            if robot.serial in self._robot_failures:
+                _LOGGER.info("Vacuula robot connection recovered")
+                self._robot_failures.remove(robot.serial)
+        except VacuulaError:
+            robot.connected = False
+            if robot.serial not in self._robot_failures:
+                _LOGGER.info("Vacuula robot is unavailable")
+                self._robot_failures.add(robot.serial)
+            return False
+        return True
 
     async def _async_refresh_robot(self, serial: str, *, full: bool = False) -> None:
         robot = self.robots[serial]
         async with self._lock(serial):
-            try:
-                command = (
-                    {"cmd": "getRobotState"}
-                    if robot.generation == GEN3
-                    else {"ability": "state.show"}
-                )
-                robot.state = response_data(
-                    await self.client.async_command(serial, command)
-                )
-                self._update_capabilities(robot)
-                if serial in self._robot_failures:
-                    _LOGGER.info("Vacuula robot connection recovered")
-                    self._robot_failures.remove(serial)
-            except VacuulaError:
-                robot.connected = False
-                if serial not in self._robot_failures:
-                    _LOGGER.info("Vacuula robot is unavailable")
-                    self._robot_failures.add(serial)
+            if not await self._async_read_state_locked(robot):
                 return
             if (
                 not full
@@ -320,6 +323,35 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         async with self._lock(serial):
             return await self.client.async_map_action(serial, map_id, action, payload)
 
+    async def async_set_map_boundaries(
+        self, serial: str, map_id: str, boundaries: list[dict[str, Any]]
+    ) -> Any:
+        """Save Gen4 boundaries and replace an active robot map in one transaction."""
+        async with self._lock(serial):
+            maps = await self.client.async_maps(serial)
+            floor_map = next((item for item in maps if item.get("id") == map_id), None)
+            if floor_map is None:
+                raise VacuulaError("Map does not belong to the robot")
+            result = await self.client.async_map_action(
+                serial, map_id, "boundaries", boundaries
+            )
+            if floor_map.get("promoted") is True:
+                await self.client.async_map_action(serial, map_id, "promote")
+            return result
+
+    async def async_refresh_maps(self, serial: str) -> None:
+        """Read saved maps without issuing unrelated robot or history commands."""
+        try:
+            async with self._lock(serial):
+                maps = await self.client.async_maps(serial)
+                self.robots[serial].maps = maps
+                self.robots[serial].capabilities["maps_available"] = True
+        except VacuulaError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="command_failed"
+            ) from err
+        self.async_set_updated_data(self.robots)
+
     async def async_update_map(
         self, serial: str, map_id: str, name: str, enabled: bool
     ) -> None:
@@ -331,10 +363,39 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="command_failed"
             ) from err
-        await self.async_refresh_robot(serial, full=True)
+        await self.async_refresh_maps(serial)
+
+    async def _async_command_readback_locked(
+        self, robot: RobotData, command: dict[str, Any]
+    ) -> None:
+        """Confirm state and only the setting changed by this command."""
+        if not await self._async_read_state_locked(robot):
+            return
+        name = command.get("cmd", command.get("ability"))
+        targets = {
+            "setPreferences": ("preferences", "getPreferences"),
+            "setSchedule": ("schedule", "getSchedule"),
+            "enableSchedule": ("schedule", "getSchedule"),
+            "disableSchedule": ("schedule", "getSchedule"),
+            "settings.set_cleaning_options": (
+                "preferences",
+                "settings.cleaning_options",
+            ),
+            "settings.set_robot_language": ("preferences", "settings.robot_language"),
+            "scheduling.update": ("schedule", "scheduling.show"),
+            "scheduling.delete": ("schedule", "scheduling.show"),
+        }
+        if name not in targets:
+            return
+        attribute, query = targets[name]
+        if (value := await self._async_optional(robot, query)) is not None:
+            if robot.generation == GEN4 and attribute == "preferences":
+                robot.preferences.update(value)
+            else:
+                setattr(robot, attribute, value)
 
     async def async_command(
-        self, serial: str, command: dict[str, Any]
+        self, serial: str, command: dict[str, Any], *, refresh: bool = True
     ) -> dict[str, Any]:
         """Execute exactly once, serialize commands and confirm state afterwards."""
         if serial not in self.robots or not self.robots[serial].connected:
@@ -380,14 +441,66 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                         )
                     command = {**settings, **changes, "ability": ability}
                 result = await self.client.async_command(serial, command)
+                if refresh:
+                    await self._async_command_readback_locked(
+                        self.robots[serial], command
+                    )
             except VacuulaError as err:
                 raise HomeAssistantError(
                     translation_domain=DOMAIN, translation_key="command_failed"
                 ) from err
-        await self._async_refresh_robot(serial, full=True)
-        await self._async_refresh_resources(serial, full=True)
-        self.async_set_updated_data(self.robots)
+        if refresh:
+            self.async_set_updated_data(self.robots)
         return result
+
+    async def async_return_to_base(self, serial: str) -> None:
+        """Pause an active run before docking, without interleaved robot commands."""
+        if serial not in self.robots or not self.robots[serial].connected:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="offline"
+            )
+        robot = self.robots[serial]
+
+        def command_allowed(flag: str) -> Any:
+            key = (
+                "availableCommands"
+                if robot.generation == GEN3
+                else "available_commands"
+            )
+            commands = robot.state.get(key, {})
+            return commands.get(flag) if isinstance(commands, dict) else None
+
+        home_flag = "goToBase" if robot.generation == GEN3 else "return_to_base"
+        pause = (
+            {"cmd": "pauseCleaning"}
+            if robot.generation == GEN3
+            else {"ability": "cleaning.pause"}
+        )
+        home = (
+            {"cmd": "sendToBase"}
+            if robot.generation == GEN3
+            else {"ability": "navigation.return_to_base"}
+        )
+        async with self._lock(serial):
+            try:
+                if command_allowed("pause") is True:
+                    await self.client.async_command(serial, pause)
+                    await asyncio.sleep(3.5)
+                    if not await self._async_read_state_locked(robot):
+                        raise HomeAssistantError(
+                            translation_domain=DOMAIN, translation_key="command_failed"
+                        )
+                if command_allowed(home_flag) is False:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN, translation_key="action_unavailable"
+                    )
+                await self.client.async_command(serial, home)
+                await self._async_read_state_locked(robot)
+            except VacuulaError as err:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="command_failed"
+                ) from err
+        self.async_set_updated_data(self.robots)
 
     async def async_set_cleaning_option(
         self, serial: str, key: str, value: Any
@@ -397,10 +510,11 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="unknown_robot"
             )
-        options = self.cleaning_options.setdefault(serial, {})
-        options[key] = value
+        options = deepcopy(self.cleaning_options)
+        options.setdefault(serial, {})[key] = value
         self.hass.config_entries.async_update_entry(
             self.entry,
-            options={**self.entry.options, "cleaning_options": self.cleaning_options},
+            options={**self.entry.options, "cleaning_options": options},
         )
+        self.cleaning_options = deepcopy(options)
         self.async_set_updated_data(self.robots)

@@ -14,6 +14,8 @@ from yarl import URL
 JSON_LIMIT = 16 * 1024 * 1024
 SSE_LIMIT = 2 * 1024 * 1024
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=45, connect=10, sock_read=40)
+# Vacuula waits up to 60 seconds for the robot to acknowledge map promotion.
+MAP_PROMOTE_TIMEOUT = aiohttp.ClientTimeout(total=90, connect=10, sock_read=80)
 EVENT_TIMEOUT = aiohttp.ClientTimeout(total=None, connect=10, sock_read=45)
 
 
@@ -156,7 +158,10 @@ class VacuulaClient:
         self.base_url = base_url.rstrip("/")
 
     def _url(self, *segments: str) -> URL:
-        path = "/".join(quote(segment, safe="") for segment in segments)
+        # Vacuula matches raw paths without decoding their identifiers. Gen3
+        # map/run IDs contain timestamp colons; retain those URI-safe characters
+        # while still escaping path, query and fragment delimiters.
+        path = "/".join(quote(segment, safe=":") for segment in segments)
         return URL(f"{self.base_url}/api/{path}", encoded=True)
 
     @staticmethod
@@ -190,13 +195,14 @@ class VacuulaClient:
         payload: Any = None,
         command: bool = False,
         allow_ok: bool = False,
+        timeout: aiohttp.ClientTimeout = REQUEST_TIMEOUT,
     ) -> Any:
         try:
             async with self._session.request(
                 method,
                 self._url(*segments),
                 json=payload,
-                timeout=REQUEST_TIMEOUT,
+                timeout=timeout,
                 allow_redirects=False,
             ) as response:
                 if response.status in (401, 403) or 300 <= response.status < 400:
@@ -325,6 +331,7 @@ class VacuulaClient:
             action,
             payload=payload,
             allow_ok=True,
+            timeout=MAP_PROMOTE_TIMEOUT if action == "promote" else REQUEST_TIMEOUT,
         )
 
     async def _events(self, *segments: str) -> AsyncGenerator[tuple[str | None, Any]]:

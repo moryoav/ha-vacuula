@@ -1,5 +1,7 @@
 """Local Home Assistant integration for the Vacuula server."""
 
+from copy import deepcopy
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
@@ -20,6 +22,21 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register actions even when a server is temporarily unavailable."""
     async_setup_services(hass)
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: VacuulaConfigEntry) -> bool:
+    """Do not reinterpret an old house default as consent to ignore saved maps."""
+    if entry.version != 1:
+        return False
+    if entry.minor_version < 2:
+        options = deepcopy(dict(entry.options))
+        cleaning_options = options.get("cleaning_options", {})
+        if isinstance(cleaning_options, dict):
+            for defaults in cleaning_options.values():
+                if isinstance(defaults, dict) and defaults.get("category") == "house":
+                    defaults["category"] = "auto"
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
     return True
 
 

@@ -31,6 +31,18 @@ async def test_cached_diagnostics(hass):
         state={
             "charge": 84,
             "isCharging": True,
+            "details": {
+                "charge": 84,
+                "isDocked": True,
+                "isCharging": True,
+                "serial": serial,
+                "name": name,
+            },
+            "meta": {
+                "firmware": "4.5.3-189",
+                "modelName": "BotVacConnectedD5",
+                "serial": serial,
+            },
             "error": None,
             "availableServices": {"houseCleaning": "1.0", "token": "secret"},
             "cleaning": {"mode": "eco", "coordinates": [1.23, 4.56]},
@@ -44,6 +56,7 @@ async def test_cached_diagnostics(hass):
             "model": "D7",
             "firmware": "4.6",
             "version": 2,
+            "meta": {"firmware": "4.5.3-189", "name": name, "ssid": "PRIVATE-SSID"},
             "serial": serial,
             "name": name,
             "mac": "PRIVATE-MAC",
@@ -72,7 +85,21 @@ async def test_cached_diagnostics(hass):
     result = await async_get_config_entry_diagnostics(hass, entry)
     assert result["server"] == {"version": "1.2.3"}
     exported = result["robots"][0]
-    assert exported["info"] == {"model": "D7", "firmware": "4.6", "version": 2}
+    assert exported["info"] == {
+        "model": "D7",
+        "firmware": "4.6",
+        "version": 2,
+        "meta": {"firmware": "4.5.3-189"},
+    }
+    assert exported["state"]["details"] == {
+        "charge": 84,
+        "isDocked": True,
+        "isCharging": True,
+    }
+    assert exported["state"]["meta"] == {
+        "firmware": "4.5.3-189",
+        "modelName": "BotVacConnectedD5",
+    }
     assert exported["state"]["status"] == "**REDACTED**"
     assert exported["state"]["errors"] == [{"code": 7}]
     assert exported["state"]["cleaning"] == {"mode": "eco"}

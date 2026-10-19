@@ -17,6 +17,7 @@ _SAFE_KEYS = frozenset(
         "firmware_version",
         "model",
         "model_name",
+        "modelName",
         "hardware_version",
         "software",
         "software_version",
@@ -25,6 +26,8 @@ _SAFE_KEYS = frozenset(
         "manufacturer",
         "build",
         "branch",
+        "details",
+        "meta",
         "state",
         "action",
         "error",
@@ -37,6 +40,8 @@ _SAFE_KEYS = frozenset(
         "modifier",
         "isCharging",
         "isDocked",
+        "is_charging",
+        "is_docked",
         "isSleeping",
         "isScheduleEnabled",
         "isDirtbinInstalled",
@@ -122,6 +127,7 @@ _INFO_KEYS = frozenset(
         "firmware_version",
         "model",
         "model_name",
+        "modelName",
         "hardware_version",
         "software",
         "software_version",
@@ -130,6 +136,7 @@ _INFO_KEYS = frozenset(
         "manufacturer",
         "build",
         "branch",
+        "meta",
     }
 )
 
@@ -160,7 +167,11 @@ def _info(value: dict[str, Any], private: tuple[str, ...]) -> dict[str, Any]:
     return {
         key: _snapshot(item, private)
         for key, item in value.items()
-        if key in _INFO_KEYS and isinstance(item, str | bool | int | float)
+        if key in _INFO_KEYS
+        and (
+            isinstance(item, str | bool | int | float)
+            or (key == "meta" and isinstance(item, Mapping))
+        )
     }
 
 

@@ -74,6 +74,11 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
             return self.coordinator.last_update_success
         if not super().available:
             return False
+        if self.key == "return_to_base":
+            return (
+                self.command_allowed("goToBase", "return_to_base") is not False
+                or self.command_allowed("pause", "pause") is True
+            )
         if self.key in COMMANDS:
             _cmd, _ability, gen3_flag, gen4_flag = COMMANDS[self.key]
             return (
@@ -102,6 +107,8 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
             await VacuulaVacuum(self.coordinator, self.serial).async_start()
         elif self.key == "clean_spot":
             await VacuulaVacuum(self.coordinator, self.serial).async_clean_spot()
+        elif self.key == "return_to_base":
+            await VacuulaVacuum(self.coordinator, self.serial).async_return_to_base()
         elif self.key == "upload_logs":
             await self.coordinator.async_command(
                 self.serial, {"cmd": "uploadLogs", "params": {"recentCount": 1}}

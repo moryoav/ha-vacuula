@@ -5,8 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 
 from custom_components.vacuula.client import (
+    MAP_PROMOTE_TIMEOUT,
+    REQUEST_TIMEOUT,
     CannotConnect,
     CommandError,
     InvalidAuth,
@@ -82,6 +86,50 @@ async def test_encode_identifiers_as_single_path_segments():
     assert session.request.call_args.args[1].raw_path == (
         "/api/robot/robot%20%2F%3F%23%25/maps/map%2F%3F%23"
     )
+
+
+@pytest.mark.usefixtures("socket_enabled")
+async def test_timestamp_ids_survive_the_actual_http_raw_path():
+    """The app matches raw paths, without decoding timestamp-based map/run IDs."""
+    map_id = "2026-10-19T10:00:00Z"
+    paths = []
+
+    async def handle(request):
+        paths.append(request.raw_path)
+        assert request.query_string == ""
+        if request.method == "GET":
+            return web.json_response({"id": map_id})
+        await request.read()
+        return web.Response(text="OK")
+
+    app = web.Application()
+    app.router.add_route("*", "/{path:.*}", handle)
+    async with TestServer(app) as server, aiohttp.ClientSession() as session:
+        client = VacuulaClient(session, str(server.make_url("/")))
+        assert await client.async_map("robot", map_id) == {"id": map_id}
+        assert await client.async_run("robot", map_id) == {"id": map_id}
+        await client.async_update_map("robot", map_id, "Downstairs", True)
+        await client.async_map_action("robot", map_id, "boundaries", [])
+    assert paths == [
+        f"/api/robot/robot/maps/{map_id}",
+        f"/api/robot/robot/run/{map_id}",
+        f"/api/robot/robot/maps/{map_id}",
+        f"/api/robot/robot/maps/{map_id}/boundaries",
+    ]
+
+
+@pytest.mark.parametrize("action", ["promote", "use", "unuse", "boundaries"])
+async def test_map_promotion_allows_the_server_acknowledgement_window(action):
+    """Only promotion needs more than the server's 60 s acknowledgement wait."""
+    client, session, _ = make_client(raw=b"OK")
+    await client.async_map_action("robot", "map", action)
+    timeout = session.request.call_args.kwargs["timeout"]
+    assert timeout is (MAP_PROMOTE_TIMEOUT if action == "promote" else REQUEST_TIMEOUT)
+    if action == "promote":
+        assert timeout.total > 60
+        assert timeout.sock_read > 60
+        assert timeout.connect == REQUEST_TIMEOUT.connect
+    session.request.assert_called_once()
 
 
 @pytest.mark.parametrize(

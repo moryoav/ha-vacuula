@@ -24,6 +24,9 @@ def setup(hass):
     coordinator.async_request_refresh = AsyncMock()
     coordinator.async_stop = AsyncMock()
     coordinator.async_refresh_robot = AsyncMock()
+    coordinator.async_refresh_maps = AsyncMock()
+    coordinator.async_set_map_boundaries = AsyncMock(return_value={})
+    coordinator.async_update_map = AsyncMock(return_value={})
     coordinator.client.async_maps = AsyncMock(return_value=[])
     coordinator.client.async_runs = AsyncMock(return_value=[])
     coordinator.client.async_map = AsyncMock(return_value={"width": 1})
@@ -127,7 +130,7 @@ async def test_clean_gen4(hass, setup):
 async def test_schedule(hass, setup):
     coordinator, robot, _, _ = setup
     events = [{"mode": 1, "day": 0, "startTime": "10:30"}]
-    await call(hass, setup, "set_schedule", events=events)
+    await call(hass, setup, "set_schedule", events=events, time_basis="utc")
     assert coordinator.async_command.await_args.args[1] == {
         "cmd": "setSchedule",
         "params": {"events": events},
@@ -187,10 +190,9 @@ async def test_boundaries(hass, setup):
         await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[polygon])
     del polygon["relevancy"]
     await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[polygon])
-    assert coordinator.client.async_map_action.await_args.args == (
+    assert coordinator.async_set_map_boundaries.await_args.args == (
         robot.serial,
         "map1",
-        "boundaries",
         [polygon],
     )
 

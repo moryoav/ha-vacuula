@@ -1,28 +1,82 @@
 # Vacuula for Home Assistant
 
+[![HACS custom repository](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=flat-square)](#installation)
+
+---
+
 Local Home Assistant integration for Neato robots already connected to a
 [Vacuula server](https://github.com/vacuula/vacuula). Home Assistant talks to the
 same local app API as the Vacuula web interface. It needs no Neato account,
 robot credentials, or cloud connection.
 
-This is a local development integration, tested against Home Assistant
-**2026.10.2**. It has no official Home Assistant quality rating. Platinum is the
-engineering target; the remaining work is tracked in
-[the quality assessment](docs/quality-scale.md).
+## Requirements
 
-## Requirements and installation
+- Home Assistant **2026.10.2 or newer**.
+- A running [Vacuula server](https://github.com/vacuula/vacuula) with your robot
+  already connected. This integration does not provision robots or install the
+  Vacuula app.
+- [HACS](https://www.hacs.xyz/docs/use/download/download/) for the recommended
+  installation method. Manual installation is also available below.
 
-1. Set up Vacuula separately and confirm the robot appears connected in its web
-   interface. This integration does not provision robots or install the server.
-2. Copy `custom_components/vacuula` into Home Assistant's
-   `/config/custom_components/vacuula` directory, then restart Home Assistant.
-3. Open **Settings > Devices & services** and configure the discovered
-   **Vacuula** server, or choose **Add integration > Vacuula**. Manual setup also
-   searches the local network automatically.
-4. Confirm the discovered server. If several servers are found, choose one
+## Installation
+
+### 1. Install the integration
+
+#### HACS (recommended)
+
+**Vacuula is not in the default HACS catalog. Add this repository as a custom
+repository with type Integration before downloading it.**
+
+[![Open the Vacuula HACS repository](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=moryoav&repository=ha-vacuula&category=integration)
+
+1. Select the button above. If prompted, confirm **Add** to add the custom
+   repository to HACS.
+2. Open **Vacuula** in HACS and choose **Download**.
+3. Restart Home Assistant.
+
+If you prefer to add the custom repository manually:
+
+1. Open **HACS** in Home Assistant.
+2. Open the three-dot menu in the top right and select **Custom repositories**.
+3. Enter this repository URL:
+
+   ```text
+   https://github.com/moryoav/ha-vacuula
+   ```
+
+4. Select **Integration** as the type, then select **Add**.
+5. Open **Vacuula** in HACS, choose **Download**, and restart Home Assistant.
+
+#### Manual installation (alternative)
+
+Download this repository and copy:
+
+```text
+custom_components/vacuula
+```
+
+to:
+
+```text
+/config/custom_components/vacuula
+```
+
+Then restart Home Assistant and continue with setup below.
+
+### 2. Add the integration
+
+[![Add the Vacuula integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=vacuula)
+
+Use the button above after Home Assistant restarts. It opens the **Vacuula**
+setup flow, which searches for local servers automatically.
+
+You can also open **Settings > Devices & services** and configure the discovered
+**Vacuula** server, or choose **Add integration > Vacuula**.
+
+1. Confirm the discovered server. If several servers are found, choose one
    first. Home Assistant reads the address and actual port from the server's
    `_vacuula._tcp.local.` announcement. Already configured servers are excluded.
-   If no server is found, enter its HTTP or HTTPS origin, for example
+2. If no server is found, enter its HTTP or HTTPS origin, for example
    `http://vacuula.local:81`. The hostname must resolve from Home Assistant; use
    the server's LAN address if it does not.
 
@@ -247,12 +301,17 @@ robot identities, map geometry, and complete schedule contents. Review any data
 before sharing it. `get_data` responses are intentionally richer than diagnostics.
 
 To remove the integration, delete its entry in **Settings > Devices & services**.
-To remove the custom code as well, delete `/config/custom_components/vacuula`
-and restart Home Assistant. Removing the integration does not delete robots,
+To remove the custom code as well, remove **Vacuula** from HACS, or delete
+`/config/custom_components/vacuula` if installed manually, then restart Home
+Assistant. Removing the integration does not delete robots,
 maps, or schedules from Vacuula. A robot no longer listed by the server can be
 removed from Home Assistant's device registry.
 
 ## Development
+
+This custom integration is tested against Home Assistant **2026.10.2**. It has
+no official Home Assistant quality rating. Platinum is the engineering target;
+the remaining work is tracked in [the quality assessment](docs/quality-scale.md).
 
 The HTTP/SSE client is an original implementation in `client.py`; no Vacuula app
 or server implementation code is bundled. It uses Home Assistant's shared

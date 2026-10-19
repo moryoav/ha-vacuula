@@ -38,6 +38,7 @@ _GEN3_EVENT = vol.Schema(
         vol.Required("day"): vol.All(int, vol.Range(min=0, max=6)),
         vol.Required("startTime"): _TIME,
         vol.Optional("boundaryId"): _IDENTIFIER,
+        vol.Optional("boundary"): vol.Any(None, dict),
     }
 )
 _VERTEX = vol.All(
@@ -104,7 +105,11 @@ def _cleaning_settings(robot: RobotData, data: dict[str, Any]) -> tuple[str, str
 
 
 def _clean_command(
-    robot: RobotData, data: dict[str, Any], *, use_default_map: bool = False
+    robot: RobotData,
+    data: dict[str, Any],
+    *,
+    use_default_map: bool = False,
+    require_dock: bool = True,
 ) -> dict[str, Any]:
     mode, navigation = _cleaning_settings(robot, data)
     map_id = data.get("map_id")
@@ -114,7 +119,9 @@ def _clean_command(
     if map_id and data.get("cleaning_type") == "house":
         raise _error("invalid_option")
     target = (
-        cleaning_target(robot, data.get("cleaning_type", "auto"))
+        cleaning_target(
+            robot, data.get("cleaning_type", "auto"), require_dock=require_dock
+        )
         if use_default_map and map_id is None
         else {}
     )
@@ -159,9 +166,21 @@ def _gen3_schedule_events(
 
     Match Vacuula's current-offset conversion. Gen3 stores a fixed UTC weekly
     schedule, so local times must be written again after a DST offset change.
-    Explicit UTC input remains available for round-tripping raw robot data.
+    Normalize a returned boundary object to the writable boundaryId. Never drop
+    an unresolved or conflicting zone while replacing the complete schedule.
+    Explicit UTC input preserves the robot's clock slots.
     """
     events: list[dict[str, Any]] = [dict(event) for event in data["events"]]
+    for event in events:
+        boundary = event.pop("boundary", None)
+        if boundary is not None:
+            try:
+                boundary_id = _IDENTIFIER(boundary.get("id"))
+            except vol.Invalid as err:
+                raise _error("invalid_schedule_boundary") from err
+            if "boundaryId" in event and event["boundaryId"] != boundary_id:
+                raise _error("invalid_schedule_boundary")
+            event["boundaryId"] = boundary_id
     if data["time_basis"] == "utc":
         return events
     offset = dt_util.now(ZoneInfo(hass.config.time_zone)).utcoffset()
@@ -205,6 +224,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
             ),
             vol.Required("time"): _TIME,
             vol.Optional("map_id"): _IDENTIFIER,
+            vol.Optional("cleaning_type", default="auto"): vol.In(
+                ["auto", "map", "house"]
+            ),
             vol.Optional("zone_ids", default=[]): vol.All(
                 [_IDENTIFIER], vol.Length(max=20)
             ),
@@ -261,10 +283,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 # ownership using the per-robot map file before sending a write.
                 await coordinator.client.async_map(serial, data["map_id"])
             if action == "clean":
+                if data["cleaning_type"] != "house":
+                    coordinator.validate_map_recovery(serial)
                 if "map_id" not in data and data["cleaning_type"] != "house":
                     await coordinator.async_refresh_maps(serial)
                 result = await coordinator.async_command(
-                    serial, _clean_command(robot, data, use_default_map=True)
+                    serial,
+                    _clean_command(robot, data, use_default_map=True),
+                    require_map_recovery=data["cleaning_type"] != "house",
                 )
             elif action == "set_schedule":
                 _require_generation(robot, GEN3)
@@ -277,7 +303,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 )
             elif action == "update_schedule_event":
                 _require_generation(robot, GEN4)
-                command = _clean_command(robot, data)
+                if data["cleaning_type"] != "house":
+                    coordinator.validate_map_recovery(serial)
+                if "map_id" not in data and data["cleaning_type"] != "house":
+                    await coordinator.async_refresh_maps(serial)
+                command = _clean_command(
+                    robot, data, use_default_map=True, require_dock=False
+                )
                 event = {
                     "enabled": data["enabled"],
                     "days": data["days"],
@@ -291,7 +323,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 if "event_id" in data:
                     event["id"] = data["event_id"]
                 result = await coordinator.async_command(
-                    serial, {"ability": "scheduling.update", "event": event}
+                    serial,
+                    {"ability": "scheduling.update", "event": event},
+                    require_map_recovery=data["cleaning_type"] != "house",
                 )
             elif action == "delete_schedule_event":
                 _require_generation(robot, GEN4)
@@ -327,7 +361,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     result = await coordinator.async_set_map_boundaries(
                         serial, data["map_id"], data["boundaries"]
                     )
-                    await coordinator.async_refresh_maps(serial)
             elif action == "rename_robot":
                 await coordinator.client.async_update_robot(serial, data["name"])
                 robot.name = data["name"]
@@ -355,7 +388,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 )
             else:
                 return {"data": await _get_data(coordinator, robot, data)}
-            if action == "map_action":
+            if action == "map_action" and data["action"] != "promote":
                 await coordinator.async_refresh_maps(serial)
             return {"response": result}
         except VacuulaError as err:

@@ -75,7 +75,7 @@ async def test_legacy_empty_hostname_entry_remains_single_when_robots_arrive(
     resolver.assert_not_awaited()
 
 
-async def test_manual_search_recognizes_configured_empty_hostname_without_form(
+async def test_manual_search_skips_configured_empty_hostname_and_offers_address(
     hass, api, resolver
 ):
     MockConfigEntry(
@@ -88,8 +88,8 @@ async def test_manual_search_recognizes_configured_empty_hostname_without_form(
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": "user"}
         )
-    assert result["type"] == FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
     api.assert_not_called()
     resolver.assert_not_awaited()
 

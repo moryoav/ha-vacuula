@@ -1,6 +1,6 @@
 clean:
   name: Clean a map or zone
-  description: Start a cleaning run with explicit settings. Automatically uses the saved active map when available. Whole home explicitly ignores zones and no-go boundaries. Generation 3 supports one zone per action.
+  description: Start a cleaning run with explicit settings. Automatically uses an active saved map while docked, otherwise starts whole-home cleaning without no-go boundaries. Choose Map to require mapped cleaning. Generation 3 supports one zone per action.
   fields:
     device_id: &device
       name: Robot
@@ -14,7 +14,7 @@ clean:
         text:
     cleaning_type:
       name: Cleaning type
-      description: Auto uses an available active map. Map requires one. Whole home explicitly ignores maps and no-go boundaries. An explicit map ID takes precedence over Auto or Map.
+      description: Auto uses an active map while docked and falls back to whole-home cleaning otherwise. Map requires a usable map and docked robot. Whole home ignores maps and no-go boundaries. An explicit map ID takes precedence over Auto or Map.
       default: auto
       selector:
         select:
@@ -55,19 +55,19 @@ set_schedule:
     events:
       name: Events
       required: true
-      description: List of mode (1 eco, 2 turbo), day (0 Sunday to 6 Saturday), startTime (HH:MM), and optional boundaryId. Times and weekdays use the selected time basis.
+      description: List of mode (1 eco, 2 turbo), day (0 Sunday to 6 Saturday), startTime (HH:MM), and optional boundaryId. A returned boundary object must contain its id and is converted to boundaryId. Missing or conflicting zone IDs are rejected. Times and weekdays use the selected time basis.
       selector:
         object:
     time_basis:
       name: Time basis
-      description: Local uses Home Assistant's timezone. UTC accepts raw robot schedules, including schedules returned by get_data.
+      description: Local uses Home Assistant's timezone. UTC preserves clock slots from get_data. Returned zone objects must contain a valid id before they can be written back.
       default: local
       selector:
         select:
           options: [local, utc]
 update_schedule_event:
   name: Add or update schedule event
-  description: Add or update a Generation 4 schedule event. Times use the robot's configured timezone.
+  description: Add or update a Generation 4 schedule event. Automatically uses the promoted floorplan and respects no-go boundaries when available, regardless of the robot's current dock state. Times use the robot's configured timezone.
   fields:
     device_id: *device
     event_id:
@@ -92,6 +92,19 @@ update_schedule_event:
       selector:
         text:
     map_id: *map
+    cleaning_type:
+      name: Cleaning type
+      description: Auto uses the promoted floorplan when available. Map requires one. Whole home ignores maps and no-go boundaries. The robot's current dock state does not affect future schedule events.
+      default: auto
+      selector:
+        select:
+          options:
+            - label: Auto
+              value: auto
+            - label: Map
+              value: map
+            - label: Whole home
+              value: house
     zone_ids:
       name: Zone IDs
       selector:
@@ -125,7 +138,7 @@ delete_schedule_event:
         text:
 set_boundaries:
   name: Replace map boundaries
-  description: Replace the complete boundary list on a map. An empty list removes all boundaries. An active Generation 4 floorplan is promoted again to send the changes to the robot. Inactive maps stay inactive. Use get_data to read the current boundaries first.
+  description: Replace the complete boundary list on a map. An empty list removes all boundaries. An active Generation 4 floorplan is promoted again to send the changes to the robot. A failed promotion may leave no active floorplan and blocks automatic mapped actions until a successful promote action. Inactive maps stay inactive. Use get_data to read the current boundaries first.
   fields:
     device_id: *device
     map_id:

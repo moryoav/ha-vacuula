@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.3
+
+- Matched Automatic cleaning to the app's whole-home fallback when maps are inactive or the robot is off dock, while retaining explicit mapped cleaning.
+- Kept manual address entry available when discovery finds only configured servers or advertises an unreachable address.
+- Defaulted Generation 4 schedule events to the promoted floorplan with no-go protection, independent of current docking.
+- Added persistent recovery notices and map-status readback after failed active-floorplan uploads, with guarded Automatic/mapped actions until confirmed recovery.
+- Distinguished maintenance, software updates, menus and stationary map transfers from cleaning activity.
+- Preserved explicit zone IDs in Generation 3 schedule round trips and rejected missing or conflicting nested boundary IDs before replacing a schedule.
+
 ## 0.1.2
 
 - Fixed timestamp map and run IDs in raw HTTP paths and extended map-promotion timeouts beyond the server's 60-second wait.

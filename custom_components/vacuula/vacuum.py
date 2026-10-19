@@ -54,6 +54,8 @@ def start_payload(
     mode = cleaning_mode(coordinator, serial)
     navigation = options.get("navigation_mode", "normal")
     category = "spot" if spot else options.get("category", "auto")
+    if category in {"auto", "map"}:
+        coordinator.validate_map_recovery(serial)
     target = cleaning_target(robot, category)
     if robot.generation == GEN3:
         params = {
@@ -85,12 +87,15 @@ def start_payload(
     }
 
 
-def cleaning_target(robot: RobotData, category: str = "auto") -> dict[str, Any]:
-    """Choose the app's mapped cleaning without discarding known no-go lines.
+def cleaning_target(
+    robot: RobotData, category: str = "auto", *, require_dock: bool = True
+) -> dict[str, Any]:
+    """Use an active saved map when possible, following the app's fallback.
 
     Gen3 lets the robot match its dock against all enabled maps. Gen4 requires
-    the one promoted floorplan ID. Mapless cleaning must be an explicit choice
-    when a saved map exists but cannot safely be used.
+    the one promoted floorplan ID. Automatic cleaning falls back to whole-home
+    when no map is active or the robot is off its dock. Explicit mapped cleaning
+    requires a usable map. Future schedules do not depend on current docking.
     """
     mapless = {"category": 2} if robot.generation == GEN3 else {"map": None}
     if category == "house":
@@ -101,33 +106,36 @@ def cleaning_target(robot: RobotData, category: str = "auto") -> dict[str, Any]:
         raise ServiceValidationError(
             translation_domain=DOMAIN, translation_key="invalid_option"
         )
-    if not robot.maps and category == "auto":
-        return mapless
     active_key = "enabled" if robot.generation == GEN3 else "promoted"
     maps = [item for item in robot.maps if item.get(active_key) is True]
+    if not maps and category == "auto":
+        return mapless
     if not maps or any(
         not isinstance(item.get("id"), str) or not item["id"] for item in maps
     ):
         raise ServiceValidationError(
             translation_domain=DOMAIN, translation_key="map_unavailable"
         )
+    if robot.generation != GEN3 and len(maps) != 1:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="ambiguous_map"
+        )
     if (
-        value_at(
+        require_dock
+        and value_at(
             robot.state,
             "details",
             "isDocked" if robot.generation == GEN3 else "is_docked",
         )
         is not True
     ):
+        if category == "auto":
+            return mapless
         raise ServiceValidationError(
             translation_domain=DOMAIN, translation_key="map_cleaning_requires_dock"
         )
     if robot.generation == GEN3:
         return {"category": 4}
-    if len(maps) != 1:
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="ambiguous_map"
-        )
     return {"map": {"rank_id": maps[0]["id"], "track_id": None, "nogo_enabled": True}}
 
 
@@ -190,9 +198,18 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         if action in (6, 15, "cleaning_standby"):
             return VacuumActivity.PAUSED
         if state in (2, "busy"):
-            # HA has no generic busy activity. Match its Neato integration;
-            # the Robot action sensor retains the precise operational phase.
-            return VacuumActivity.CLEANING
+            # HA has no exploration activity. It is an active navigation run,
+            # whereas map upload, logs and software updates are stationary work.
+            if action == 12 or (
+                action == 9
+                and value_at(self.robot.state, "cleaning", "category") in (1, 2, 3, 4)
+            ):
+                return VacuumActivity.CLEANING
+            return (
+                VacuumActivity.DOCKED
+                if self.detail("isDocked", "is_docked") is True
+                else VacuumActivity.IDLE
+            )
         return None
 
     @property
@@ -240,7 +257,12 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         }:
             await self.coordinator.async_refresh_maps(self.serial)
         await self.coordinator.async_command(
-            self.serial, start_payload(self.coordinator, self.serial)
+            self.serial,
+            start_payload(self.coordinator, self.serial),
+            require_map_recovery=self.coordinator.cleaning_options.get(
+                self.serial, {}
+            ).get("category", "auto")
+            in {"auto", "map"},
         )
 
     async def async_stop(self, **kwargs: Any) -> None:

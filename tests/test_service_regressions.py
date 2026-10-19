@@ -1,5 +1,6 @@
 """Regression coverage for local schedules, map changes and read-only actions."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,6 +11,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.vacuula.client import CannotConnect
 from custom_components.vacuula.const import DOMAIN, GEN3, GEN4
+from custom_components.vacuula.coordinator import VacuulaCoordinator
 from custom_components.vacuula.data import RobotData
 from custom_components.vacuula.services import async_setup_services
 
@@ -109,7 +111,7 @@ async def test_gen3_boundary_write_has_no_duplicate_refresh(hass, action_setup):
 
 
 async def test_gen4_boundary_write_uses_atomic_save_and_promote(hass, action_setup):
-    """The coordinator owns the complete transaction, then only maps are read."""
+    """The coordinator owns the transaction and its map readback."""
     coordinator, robot, _ = action_setup
     robot.generation = GEN4
     result = await _call(
@@ -119,7 +121,7 @@ async def test_gen4_boundary_write_uses_atomic_save_and_promote(hass, action_set
     coordinator.async_set_map_boundaries.assert_awaited_once_with(
         robot.serial, "map1", []
     )
-    coordinator.async_refresh_maps.assert_awaited_once_with(robot.serial)
+    coordinator.async_refresh_maps.assert_not_awaited()
     coordinator.async_refresh_robot.assert_not_awaited()
     coordinator.async_command.assert_not_awaited()
 
@@ -185,3 +187,340 @@ async def test_clean_requires_map_when_explicitly_selected(hass, action_setup):
     with pytest.raises(ServiceValidationError):
         await _call(hass, action_setup, "clean", cleaning_type="map")
     coordinator.async_command.assert_not_awaited()
+
+
+@pytest.mark.parametrize("docked", [True, False, None])
+@pytest.mark.parametrize("nogo_enabled", [True, False])
+async def test_gen4_schedule_defaults_to_fresh_promoted_map(
+    hass, action_setup, docked, nogo_enabled
+):
+    """A future scheduled run uses the floorplan even when saved off its dock."""
+    coordinator, robot, _ = action_setup
+    robot.generation = GEN4
+    robot.state = {"details": {"is_docked": docked}}
+    robot.maps = [{"id": "stale", "promoted": False}]
+
+    async def get_maps(serial):
+        assert serial == robot.serial
+        robot.maps = [{"id": "current", "promoted": True}]
+
+    coordinator.async_refresh_maps.side_effect = get_maps
+    await _call(
+        hass,
+        action_setup,
+        "update_schedule_event",
+        enabled=True,
+        days=["mon"],
+        time="09:00",
+        nogo_enabled=nogo_enabled,
+    )
+    coordinator.validate_map_recovery.assert_called_once_with(robot.serial)
+    coordinator.async_refresh_maps.assert_awaited_once_with(robot.serial)
+    assert coordinator.async_command.await_args.args[1] == {
+        "ability": "scheduling.update",
+        "event": {
+            "enabled": True,
+            "days": ["mon"],
+            "time": "09:00",
+            "command": {
+                "ability": "cleaning.start",
+                "runs": [
+                    {
+                        "map": {
+                            "rank_id": "current",
+                            "track_id": None,
+                            "nogo_enabled": nogo_enabled,
+                        },
+                        "settings": {"mode": "eco", "navigation_mode": "normal"},
+                    }
+                ],
+                "auto_localization": False,
+                "force_floorplan": False,
+            },
+        },
+    }
+
+
+@pytest.mark.parametrize("maps", [[], [{"id": "map1", "promoted": False}]])
+async def test_gen4_schedule_without_promoted_map_uses_whole_home(
+    hass, action_setup, maps
+):
+    coordinator, robot, _ = action_setup
+    robot.generation = GEN4
+    robot.maps = maps
+    await _call(
+        hass,
+        action_setup,
+        "update_schedule_event",
+        enabled=True,
+        days=["sun"],
+        time="09:00",
+    )
+    assert (
+        coordinator.async_command.await_args.args[1]["event"]["command"]["runs"][0][
+            "map"
+        ]
+        is None
+    )
+
+
+async def test_gen4_schedule_explicit_whole_home_ignores_promoted_map(
+    hass, action_setup
+):
+    coordinator, robot, _ = action_setup
+    robot.generation = GEN4
+    robot.maps = [{"id": "map1", "promoted": True}]
+    await _call(
+        hass,
+        action_setup,
+        "update_schedule_event",
+        enabled=True,
+        days=["sun"],
+        time="09:00",
+        cleaning_type="house",
+    )
+    assert (
+        coordinator.async_command.await_args.args[1]["event"]["command"]["runs"][0][
+            "map"
+        ]
+        is None
+    )
+    coordinator.async_refresh_maps.assert_not_awaited()
+    coordinator.validate_map_recovery.assert_not_called()
+
+
+async def test_gen4_schedule_explicit_zone_keeps_target_and_settings(
+    hass, action_setup
+):
+    coordinator, robot, _ = action_setup
+    robot.generation = GEN4
+    robot.state = {"details": {"is_docked": False}}
+    await _call(
+        hass,
+        action_setup,
+        "update_schedule_event",
+        enabled=True,
+        days=["sun"],
+        time="09:00",
+        map_id="map2",
+        zone_ids=["zone1", "zone2"],
+        mode="turbo",
+        navigation="gentle",
+    )
+    runs = coordinator.async_command.await_args.args[1]["event"]["command"]["runs"]
+    assert [run["map"]["track_id"] for run in runs] == ["zone1", "zone2"]
+    assert all(run["map"]["rank_id"] == "map2" for run in runs)
+    assert all(run["map"]["nogo_enabled"] is True for run in runs)
+    assert all(
+        run["settings"] == {"mode": "turbo", "navigation_mode": "gentle"}
+        for run in runs
+    )
+    coordinator.async_refresh_maps.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{"cleaning_type": "map"}, {"cleaning_type": "house", "map_id": "map1"}],
+)
+async def test_gen4_schedule_invalid_map_selection_does_not_write(
+    hass, action_setup, payload
+):
+    coordinator, robot, _ = action_setup
+    robot.generation = GEN4
+    with pytest.raises(ServiceValidationError):
+        await _call(
+            hass,
+            action_setup,
+            "update_schedule_event",
+            enabled=True,
+            days=["sun"],
+            time="09:00",
+            **payload,
+        )
+    coordinator.async_command.assert_not_awaited()
+
+
+async def test_gen4_schedule_map_refresh_failure_does_not_write(hass, action_setup):
+    coordinator, robot, _ = action_setup
+    robot.generation = GEN4
+    coordinator.async_refresh_maps.side_effect = HomeAssistantError("unreachable")
+    with pytest.raises(HomeAssistantError):
+        await _call(
+            hass,
+            action_setup,
+            "update_schedule_event",
+            enabled=True,
+            days=["sun"],
+            time="09:00",
+        )
+    coordinator.async_command.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["clean", "update_schedule_event"])
+async def test_clean_and_schedule_require_known_floorplan_recovery(
+    hass, action_setup, action
+):
+    coordinator, robot, _ = action_setup
+    robot.generation = GEN4
+    coordinator.validate_map_recovery.side_effect = ServiceValidationError(
+        translation_domain=DOMAIN, translation_key="map_promotion_required"
+    )
+    payload = (
+        {"enabled": True, "days": ["sun"], "time": "09:00"}
+        if action == "update_schedule_event"
+        else {}
+    )
+    with pytest.raises(ServiceValidationError) as error:
+        await _call(hass, action_setup, action, **payload)
+    assert error.value.translation_key == "map_promotion_required"
+    coordinator.async_refresh_maps.assert_not_awaited()
+    coordinator.async_command.assert_not_awaited()
+
+
+@pytest.mark.parametrize("time_basis", ["utc", "local"])
+@pytest.mark.parametrize("explicit_id", [False, True])
+async def test_returned_gen3_boundary_id_is_preserved_on_schedule_write(
+    hass, action_setup, freezer, time_basis, explicit_id
+):
+    """Normalize an identified response zone, without changing caller data."""
+    freezer.move_to("2026-10-19T09:00:00Z")
+    hass.config.time_zone = "Asia/Jerusalem"
+    coordinator = action_setup[0]
+    event = {
+        "mode": 1,
+        "day": 0,
+        "startTime": "09:00",
+        "boundary": {"id": "zone1", "name": "Living room"},
+    }
+    if explicit_id:
+        event["boundaryId"] = "zone1"
+    coordinator.async_command.return_value = {"data": {"events": [event]}}
+    response = await _call(hass, action_setup, "get_data", resource="schedule")
+    await _call(
+        hass,
+        action_setup,
+        "set_schedule",
+        events=response["data"]["events"],
+        time_basis=time_basis,
+    )
+    assert coordinator.async_command.await_args.args[1] == {
+        "cmd": "setSchedule",
+        "params": {
+            "events": [
+                {
+                    "mode": 1,
+                    "day": 0,
+                    "startTime": "09:00" if time_basis == "utc" else "06:00",
+                    "boundaryId": "zone1",
+                }
+            ]
+        },
+    }
+    assert "boundary" in event
+    assert event["startTime"] == "09:00"
+
+
+async def test_gen3_null_boundary_is_a_whole_home_schedule(hass, action_setup):
+    coordinator = action_setup[0]
+    await _call(
+        hass,
+        action_setup,
+        "set_schedule",
+        events=[{"mode": 1, "day": 0, "startTime": "09:00", "boundary": None}],
+        time_basis="utc",
+    )
+    assert coordinator.async_command.await_args.args[1]["params"]["events"] == [
+        {"mode": 1, "day": 0, "startTime": "09:00"}
+    ]
+
+
+@pytest.mark.parametrize(
+    "boundary, explicit_id",
+    [
+        ({"name": "Living room"}, None),
+        ({"id": "../invalid"}, None),
+        ({"id": "zone1"}, "zone2"),
+    ],
+)
+async def test_gen3_unresolved_or_conflicting_schedule_zones_never_write(
+    hass, action_setup, boundary, explicit_id
+):
+    coordinator = action_setup[0]
+    event = {"mode": 1, "day": 0, "startTime": "09:00", "boundary": boundary}
+    if explicit_id:
+        event["boundaryId"] = explicit_id
+    with pytest.raises(ServiceValidationError) as error:
+        await _call(
+            hass,
+            action_setup,
+            "set_schedule",
+            events=[{"mode": 1, "day": 1, "startTime": "09:00"}, event],
+            time_basis="utc",
+        )
+    assert error.value.translation_key == "invalid_schedule_boundary"
+    coordinator.async_command.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["clean", "update_schedule_event"])
+@pytest.mark.parametrize("cleaning_type", ["auto", "map", "house"])
+async def test_queued_clean_and_schedule_recheck_map_recovery_under_lock(
+    hass, action_setup, action, cleaning_type
+):
+    """A marker created while a cleaning command waits cannot be bypassed."""
+    _, robot, device_id = action_setup
+    device = dr.async_get(hass).async_get(device_id)
+    entry = hass.config_entries.async_get_entry(device.config_entry_id)
+    client = MagicMock()
+    client.async_command = AsyncMock(return_value={"body": {}})
+    coordinator = VacuulaCoordinator(hass, entry, client)
+    entry.runtime_data = coordinator
+    coordinator.robots = {robot.serial: robot}
+    robot.generation = GEN4
+    robot.state = {"details": {"is_docked": True}}
+    robot.maps = [{"id": "map1", "promoted": True}]
+    maps_read = asyncio.Event()
+
+    async def refresh_maps(serial):
+        assert serial == robot.serial
+        maps_read.set()
+
+    coordinator.async_refresh_maps = AsyncMock(side_effect=refresh_maps)
+    payload = (
+        {"enabled": True, "days": ["sun"], "time": "09:00"}
+        if action == "update_schedule_event"
+        else {}
+    )
+    service_started = asyncio.Event()
+
+    async def call_action():
+        service_started.set()
+        return await _call(
+            hass, action_setup, action, cleaning_type=cleaning_type, **payload
+        )
+
+    task = None
+    try:
+        async with asyncio.timeout(5):
+            async with coordinator._lock(robot.serial):
+                task = hass.async_create_task(call_action())
+                await service_started.wait()
+                if cleaning_type != "house":
+                    await maps_read.wait()
+                assert not task.done()
+                client.async_command.assert_not_awaited()
+                coordinator._set_pending_promotion(robot.serial, "map1")
+            if cleaning_type == "house":
+                await task
+                sent = client.async_command.await_args_list[0].args[1]
+                if action == "update_schedule_event":
+                    sent = sent["event"]["command"]
+                assert sent["runs"][0]["map"] is None
+            else:
+                with pytest.raises(ServiceValidationError) as error:
+                    await task
+                assert error.value.translation_key == "map_promotion_required"
+                client.async_command.assert_not_awaited()
+    finally:
+        if task and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

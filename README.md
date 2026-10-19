@@ -76,11 +76,13 @@ You can also open **Settings > Devices & services** and configure the discovered
 1. Confirm the discovered server. If several servers are found, choose one
    first. Home Assistant reads the address and actual port from the server's
    `_vacuula._tcp.local.` announcement. Already configured servers are excluded.
-2. If no server is found, enter its HTTP or HTTPS origin, for example
+2. If no new server can be reached, enter its HTTP or HTTPS origin, for example
    `http://vacuula.local:81`. The hostname must resolve from Home Assistant; use
    the server's LAN address if it does not.
 
-The fallback **Server URL** field only appears when discovery finds no server.
+The **Server URL** field also appears when discovered servers are already
+configured, or a discovered address cannot be reached. This allows adding a
+second server or correcting an address advertised by a VPN or Docker host.
 Discovery needs local mDNS traffic to reach Home Assistant; isolated networks
 may require the manual address. Include the protocol and app API port;
 omit `/web`, `/api`, ingress paths, credentials, query parameters, and fragments.
@@ -132,12 +134,14 @@ mapping, and maintenance actions. Cleaning defaults stored by Home Assistant do
 not start a run when changed.
 
 New runs default to **Automatic (use saved map)**. Before starting, the
-integration reads the current saved-map list. With saved maps, Generation 3
-uses the robot's dock matching against enabled maps; Generation 4 uses the
-single promoted floorplan with no-go areas enabled. A mapped start requires
-the robot to be docked. Disabled maps, missing active maps, ambiguous Generation
-4 floorplans or failed map reads cause an action error instead of a mapless run.
-With no saved maps, Automatic starts ordinary whole-home cleaning.
+integration reads the current saved-map list. While docked, Generation 3 uses
+the robot's dock matching against enabled maps; Generation 4 uses the single
+promoted floorplan with no-go areas enabled. When no map is enabled/promoted,
+or the robot is off its dock, Automatic starts whole-home cleaning, matching
+the Vacuula app. This fallback does not apply saved zones or no-go lines.
+Choose **Saved map** to require mapped cleaning and reject those fallback
+conditions. Failed map reads, malformed maps and ambiguous promoted floorplans
+still report an error.
 
 **Whole home without a map** is an explicit choice that ignores saved zones and
 no-go lines. Spot cleaning also runs without the saved map. Upgrading from
@@ -148,6 +152,10 @@ intended, select it again after upgrading. Resuming continues the existing run.
 Returning to base during cleaning pauses the run, waits 3.5 seconds and checks
 the robot's latest command readiness before sending it home. The sequence is
 serialized so another action cannot interrupt the pause-to-home transition.
+
+The vacuum's activity distinguishes cleaning and exploration from maintenance.
+Log uploads, software updates, menus and stationary map transfers show docked
+or idle; the Robot action sensor retains the precise phase.
 
 Additional scalar diagnostics cover robot state, general information, cleaning
 statistics, the current subrun, the latest dated run, and its latest subrun.
@@ -211,8 +219,29 @@ and converts time and weekday to the robot's UTC clock. Use `time_basis: utc`
 when supplying raw UTC events, including events read by `get_data`. The robot
 stores fixed UTC weekly times: write a local-time schedule again after a DST
 offset change to keep the same local clock time, matching Vacuula's behavior.
+Returned events with a nested `boundary` object are accepted only when it has
+an explicit valid `id`; that ID becomes `boundaryId`. Missing or conflicting
+zone IDs reject the complete write before changing the schedule. The exact
+zone response on real Gen3 hardware remains unverified.
+
 Generation 4 events use `days` from `mon` through `sun` and `time: HH:MM` in the
-robot's configured timezone. Up to 100 Generation 3 schedule events are accepted.
+robot's configured timezone. Their default `cleaning_type: auto` uses the
+current promoted floorplan with no-go protection, even if the robot is off
+dock while the event is being created. Without a promoted floorplan it uses
+whole-home cleaning. `cleaning_type: map` requires a promoted floorplan;
+`cleaning_type: house` explicitly schedules mapless cleaning. The selected map
+is stored in the event; it is not reselected when the schedule runs. Up to 100
+Generation 3 schedule events are accepted.
+
+An active Gen4 boundary update re-promotes the map. Vacuula demotes the previous
+floorplan first, so a rejected or timed-out promotion can leave the robot
+without an active floorplan or no-go protection. The integration reads back
+status, raises a persistent Repairs notice, and blocks new Automatic/mapped
+starts and new/updated Automatic or mapped schedule commands until recovery. This survives Home Assistant
+restarts. Check the saved boundaries and run `vacuula.map_action` with
+`action: promote` and the map ID; a confirmed promotion and readback clear
+the notice. Explicit mapless cleaning remains available. Existing robot
+schedules, schedule-event switches and controls outside this integration are not blocked.
 
 A boundary contains `id`, `name`, `color` (`#RRGGBB`), `type` (`polygon` or
 `polyline`), `vertices`, and `enabled`. Vertices are normalized `[x, y]` pairs
@@ -294,6 +323,10 @@ After a successful command, the integration reads state back from the robot.
   Run maps, live robot paths, and boundary editing are not image features.
 - **Server address changed:** use **Reconfigure** with the new origin. Zeroconf
   rediscovery can also update the URL when a known robot identifies the server.
+- **Floorplan upload needs recovery:** check **Settings > System > Repairs**.
+  Verify the saved map and boundaries, then promote it using `vacuula.map_action`.
+  A failed upload may have removed active no-go protection; commands are not
+  retried automatically.
 
 Download integration diagnostics from **Settings > Devices & services** when
 investigating a fault. Diagnostics use cached data only and omit the server URL,

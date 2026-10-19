@@ -1,13 +1,13 @@
 # Local validation, 19 October 2026
 
-Integration version: **0.1.2**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.3**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
 
 ## Automated checks
 
-- **464 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference writes, manual setup discovery and the protocol/state regressions below.
-- **99.75% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.96%**. Configuration flow and discovery helper coverage are **100%**.
+- **555 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference writes, manual setup discovery and the protocol/state regressions below.
+- **99.65% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.96%**. Configuration flow coverage is **99.29%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 19 modules.
-- Ruff lint and formatting: **passed**, all 45 Python source, test and smoke-check files.
+- Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
 
 Run from the source folder on this development machine:
@@ -21,7 +21,7 @@ $TEST_PYTHON -m ruff check .
 $TEST_PYTHON -m ruff format --check .
 ```
 
-The installed test dependency versions are pinned in `requirements_test.txt`. Hassfest was run from the existing Home Assistant Core checkout with its development environment and Ruff 0.16.10.
+The installed test dependency versions are pinned in `requirements_test.txt`. Hassfest was run from the existing Home Assistant Core checkout with its development environment and an isolated Ruff 0.17.0 installation, matching the checkout's current requirement.
 
 ## Read-only hardware verification
 
@@ -81,6 +81,20 @@ These behaviors were tested with mocked robot transports; only the raw HTTP rout
 
 All 25 installed 0.1.2 files matched the tested source by SHA-256. Home Assistant configuration validation passed before and after installation. After one restart, the existing entry was **loaded**, its persisted schema was **version 1 / minor version 2**, and the D5 remained connected. A real diagnostics download identified runtime **0.1.2** and included charge, docked, charging and firmware fields without the actual robot serial. The Vacuula app was not modified.
 
+## Cleaning, discovery and recovery regressions, 0.1.3
+
+- Automatic cleaning uses whole-home fallback with disabled/unpromoted maps or an off-dock robot, matching the app. Saved map selection retains validation, including ambiguous promoted maps when off dock.
+- Manual discovery opens the address form for configured-only servers, unreachable advertisements and failed confirmation. Tests create a second server through that fallback while retaining hostname/IP duplicate protection.
+- Gen4 schedule events default to the promoted floorplan and no-go protection without requiring the robot to be docked while writing the event. Explicit mapless schedules remain supported.
+- Active boundary updates and standalone promotions persist a recovery marker before upload, refresh map status and retain a repair notice after failure/cancellation. Confirmed promotion/readback clears it. Reload, entry removal and stale-map invalidation are covered.
+- Queued Automatic/mapped cleaning and schedule writes check recovery under the robot command lock. Concurrency tests prevent them from bypassing a failed upload; explicit whole-home commands remain available.
+- Source-specific maintenance, menu, firmware and stationary map-transfer states remain docked/idle rather than triggering cleaning automations. Exploration and cleaning recovery retain active navigation behavior.
+- Gen3 schedule round trips preserve explicit nested boundary IDs and reject missing/conflicting IDs before a write. The real hardware's zone response remains unconfirmed; these tests establish supported inputs rather than a captured robot response.
+
+All robot writes were tested with mocked transports. No movement, schedule, boundary, preference or reset command was sent to the physical robot.
+
+All 25 installed 0.1.3 files matched the tested source by SHA-256. Configuration validation passed before and after copying. After one Home Assistant restart, the existing entry was **loaded**, diagnostics confirmed runtime **0.1.3**, and the D5 remained connected and docked. A real Add integration flow found the already configured server and displayed the **Server URL** form for another server. That temporary flow was removed without creating an entry. The Vacuula app was not modified.
+
 ## Quality target
 
-The implementation follows the current quality-scale checklist and has no official tier claim. Public brands submission, separately published typed client packaging, and formal Core assessment remain pending. Source, tests and documentation are maintained in the private `moryoav/ha-vacuula` repository while local owner testing continues. Public release remains pending.
+The implementation follows the current quality-scale checklist and has no official tier claim. Public brands submission, separately published typed client packaging, and formal Core assessment remain pending. Source, tests and documentation are maintained in `moryoav/ha-vacuula` while owner testing continues.

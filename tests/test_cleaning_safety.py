@@ -61,10 +61,13 @@ def prepare_robot(coordinator, generation):
 
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
+@pytest.mark.parametrize("category", [None, "auto", "map"])
 async def test_default_start_refreshes_maps_and_preserves_no_go_lines(
-    coordinator, generation
+    coordinator, generation, category
 ):
     robot = prepare_robot(coordinator, generation)
+    if category is not None:
+        coordinator.cleaning_options["robot"] = {"category": category}
     maps = robot.maps
     robot.maps = []  # A map was created after the last periodic resource refresh.
 
@@ -94,16 +97,37 @@ async def test_default_start_refreshes_maps_and_preserves_no_go_lines(
                 }
             ],
         }
-    coordinator.async_command.assert_awaited_once_with("robot", expected)
+    coordinator.async_command.assert_awaited_once_with(
+        "robot", expected, require_map_recovery=True
+    )
 
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
 @pytest.mark.parametrize("docked", [False, None])
-async def test_mapped_default_does_not_fall_back_when_not_docked(
+async def test_automatic_start_button_falls_back_when_not_docked(
     coordinator, generation, docked
 ):
     robot = prepare_robot(coordinator, generation)
     robot.state["details"] = {"isDocked" if generation == GEN3 else "is_docked": docked}
+    button = VacuulaButton(coordinator, "robot", "start")
+    assert button.available
+    await button.async_press()
+    payload = coordinator.async_command.await_args.args[1]
+    assert coordinator.async_command.await_args.kwargs == {"require_map_recovery": True}
+    if generation == GEN3:
+        assert payload["params"]["category"] == 2
+    else:
+        assert payload["runs"][0]["map"] is None
+
+
+@pytest.mark.parametrize("generation", [GEN3, GEN4])
+@pytest.mark.parametrize("docked", [False, None])
+async def test_explicit_mapped_cleaning_still_requires_dock(
+    coordinator, generation, docked
+):
+    robot = prepare_robot(coordinator, generation)
+    robot.state["details"] = {"isDocked" if generation == GEN3 else "is_docked": docked}
+    coordinator.cleaning_options["robot"] = {"category": "map"}
     with pytest.raises(ServiceValidationError) as error:
         await VacuulaVacuum(coordinator, "robot").async_start()
     assert error.value.translation_key == "map_cleaning_requires_dock"
@@ -127,9 +151,44 @@ def test_explicit_map_requires_valid_active_map(coordinator, generation, maps):
 
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
-def test_default_refuses_disabled_or_unpromoted_saved_maps(coordinator, generation):
+@pytest.mark.parametrize("maps_present", [False, True])
+async def test_automatic_start_falls_back_without_active_map(
+    coordinator, generation, maps_present
+):
     robot = prepare_robot(coordinator, generation)
     robot.maps[0]["enabled" if generation == GEN3 else "promoted"] = False
+    if not maps_present:
+        robot.maps = []
+    button = VacuulaButton(coordinator, "robot", "start")
+    assert button.available
+    await button.async_press()
+    payload = coordinator.async_command.await_args.args[1]
+    assert coordinator.async_command.await_args.kwargs == {"require_map_recovery": True}
+    if generation == GEN3:
+        assert payload["params"]["category"] == 2
+    else:
+        assert payload["runs"][0]["map"] is None
+
+
+@pytest.mark.parametrize("generation", [GEN3, GEN4])
+@pytest.mark.parametrize("category", ["auto", "map"])
+def test_future_mapped_target_ignores_current_dock_state(
+    coordinator, generation, category
+):
+    robot = prepare_robot(coordinator, generation)
+    robot.state["details"] = {}
+    target = cleaning_target(robot, category, require_dock=False)
+    if generation == GEN3:
+        assert target == {"category": 4}
+    else:
+        assert target["map"]["rank_id"] == robot.maps[0]["id"]
+        assert target["map"]["nogo_enabled"] is True
+
+
+@pytest.mark.parametrize("generation", [GEN3, GEN4])
+def test_automatic_rejects_corrupt_active_map_id(coordinator, generation):
+    robot = prepare_robot(coordinator, generation)
+    robot.maps[0]["id"] = None
     with pytest.raises(ServiceValidationError) as error:
         cleaning_target(robot)
     assert error.value.translation_key == "map_unavailable"
@@ -142,8 +201,10 @@ def test_gen3_matches_dock_across_enabled_maps_without_inventing_selection(coord
     assert "mapId" not in start_payload(coordinator, "robot")["params"]
 
 
-def test_gen4_ambiguous_promoted_maps_fail_closed(coordinator):
+@pytest.mark.parametrize("docked", [False, True])
+def test_gen4_ambiguous_promoted_maps_fail_closed(coordinator, docked):
     robot = prepare_robot(coordinator, GEN4)
+    robot.state["details"]["is_docked"] = docked
     robot.maps.append({"id": "second-floor", "promoted": True})
     with pytest.raises(ServiceValidationError) as error:
         start_payload(coordinator, "robot")
@@ -158,10 +219,36 @@ async def test_explicit_house_is_deliberate_mapless_cleaning(coordinator, genera
     await VacuulaVacuum(coordinator, "robot").async_start()
     coordinator.async_refresh_maps.assert_not_awaited()
     payload = coordinator.async_command.await_args.args[1]
+    assert coordinator.async_command.await_args.kwargs == {
+        "require_map_recovery": False
+    }
     if generation == GEN3:
         assert payload["params"]["category"] == 2
     else:
         assert payload["runs"][0]["map"] is None
+
+
+@pytest.mark.parametrize("category", ["auto", "map"])
+async def test_unresolved_floorplan_upload_does_not_silently_start_without_zones(
+    coordinator, category
+):
+    robot = prepare_robot(coordinator, GEN4)
+    robot.maps[0]["promoted"] = False
+    coordinator.cleaning_options["robot"] = {"category": category}
+    coordinator._set_pending_promotion("robot", robot.maps[0]["id"])
+    with pytest.raises(ServiceValidationError) as error:
+        await VacuulaVacuum(coordinator, "robot").async_start()
+    assert error.value.translation_key == "map_promotion_required"
+    coordinator.async_command.assert_not_awaited()
+
+
+async def test_explicit_house_remains_available_during_floorplan_recovery(coordinator):
+    robot = prepare_robot(coordinator, GEN4)
+    robot.maps[0]["promoted"] = False
+    coordinator.cleaning_options["robot"] = {"category": "house"}
+    coordinator._set_pending_promotion("robot", robot.maps[0]["id"])
+    await VacuulaVacuum(coordinator, "robot").async_start()
+    assert coordinator.async_command.await_args.args[1]["runs"][0]["map"] is None
 
 
 async def test_explicit_spot_preserves_size_and_does_not_use_a_map(coordinator):
@@ -185,6 +272,7 @@ async def test_explicit_spot_preserves_size_and_does_not_use_a_map(coordinator):
                 "spotHeight": 150,
             },
         },
+        require_map_recovery=False,
     )
 
 
@@ -263,16 +351,13 @@ async def test_return_home_button_remains_available_while_pause_is_possible(
 @pytest.mark.parametrize(
     ("generation", "state", "action", "activity"),
     [
-        (GEN3, 2, 5, "cleaning"),
-        (GEN3, 2, 7, "cleaning"),
-        (GEN3, 2, 8, "cleaning"),
-        (GEN3, 2, 9, "cleaning"),
+        (GEN3, 2, 1, "cleaning"),
+        (GEN3, 2, 2, "cleaning"),
+        (GEN3, 2, 3, "cleaning"),
+        (GEN3, 2, 11, "cleaning"),
         (GEN3, 2, 12, "cleaning"),
-        (GEN3, 2, 13, "cleaning"),
-        (GEN3, 2, 14, "cleaning"),
         (GEN3, 2, 15, "paused"),
-        (GEN4, "busy", "diagnostic_test", "cleaning"),
-        (GEN4, "busy", "updating_software", "cleaning"),
+        (GEN4, "busy", "cleaning", "cleaning"),
         (GEN4, "busy", "cleaning_standby", "paused"),
         (GEN4, "busy", "docking", "returning"),
         (GEN4, "error", "updating_software", "error"),
@@ -285,3 +370,44 @@ def test_busy_maintenance_and_mapping_phases_have_standard_activity(
     robot = prepare_robot(coordinator, generation)
     robot.state.update(state=state, action=action)
     assert VacuulaVacuum(coordinator, "robot").activity == activity
+
+
+@pytest.mark.parametrize(
+    ("generation", "action"),
+    [
+        (GEN3, 5),  # Robot menu.
+        (GEN3, 7),  # Firmware update.
+        (GEN3, 8),  # Upload robot logs.
+        (GEN3, 13),  # Fetch map IDs.
+        (GEN3, 14),  # Create/upload map after the run.
+        (GEN3, 0),  # Unknown busy action must not fabricate a cleaning run.
+        (GEN4, "diagnostic_test"),
+        (GEN4, "updating_software"),
+        (GEN4, "invalid"),
+    ],
+)
+@pytest.mark.parametrize("docked", [False, True, None])
+def test_busy_maintenance_does_not_report_cleaning(
+    coordinator, generation, action, docked
+):
+    robot = prepare_robot(coordinator, generation)
+    robot.state.update(
+        state=2 if generation == GEN3 else "busy",
+        action=action,
+        cleaning={"category": 4},  # A previous run can leave cleaning metadata.
+    )
+    robot.state["details"] = {"isDocked" if generation == GEN3 else "is_docked": docked}
+    assert VacuulaVacuum(coordinator, "robot").activity == (
+        "docked" if docked else "idle"
+    )
+
+
+@pytest.mark.parametrize("category", [None, 0, 1, 2, 3, 4])
+def test_relocalization_is_cleaning_only_for_an_actual_cleaning_run(
+    coordinator, category
+):
+    robot = prepare_robot(coordinator, GEN3)
+    robot.state.update(state=2, action=9, cleaning={"category": category})
+    assert VacuulaVacuum(coordinator, "robot").activity == (
+        "cleaning" if category in (1, 2, 3, 4) else "docked"
+    )

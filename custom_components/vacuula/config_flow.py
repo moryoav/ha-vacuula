@@ -198,7 +198,6 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         if user_input is None:
             self._discovered_servers.clear()
-            found_configured = False
             for server in await async_discover_servers(self.hass):
                 try:
                     base_url = discovery_url(server)
@@ -207,7 +206,6 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     continue
                 if entry := await self._async_duplicate(base_url, [], aliases):
                     self._remember_aliases(entry, aliases)
-                    found_configured = True
                     continue
                 self._discovered_servers[base_url] = server
             if len(self._discovered_servers) == 1:
@@ -216,8 +214,6 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             if self._discovered_servers:
                 return await self.async_step_select_server()
-            if found_configured:
-                return self.async_abort(reason="already_configured")
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
@@ -229,6 +225,13 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             else:
                 return await self._async_finish(base_url, robot_ids)
+        return self._show_address_form(errors)
+
+    def _show_address_form(
+        self, errors: dict[str, str] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Keep an address fallback when discovery cannot offer a new server."""
+        self.context.pop("confirm_only", None)
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
@@ -238,7 +241,7 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): str
                 }
             ),
-            errors=errors,
+            errors=errors or {},
         )
 
     async def async_step_select_server(
@@ -286,6 +289,8 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._discovered_aliases = discovery_aliases(discovery_info)
             _, robot_ids = await self._validate(self._discovered_url)
         except ValueError, TypeError, VacuulaError:
+            if self.source == config_entries.SOURCE_USER:
+                return self._show_address_form({"base": "cannot_connect"})
             return self.async_abort(reason="cannot_connect")
         if entry := await self._async_duplicate(
             self._discovered_url, robot_ids, self._discovered_aliases
@@ -305,6 +310,8 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ConfigEntryState.SETUP_RETRY,
                 }:
                     await self.hass.config_entries.async_reload(entry.entry_id)
+            if self.source == config_entries.SOURCE_USER:
+                return self._show_address_form()
             return self.async_abort(reason="already_configured")
         await self.async_set_unique_id(
             self._discovered_url,
@@ -323,6 +330,8 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 _, robot_ids = await self._validate(self._discovered_url)
             except VacuulaError:
+                if self.source == config_entries.SOURCE_USER:
+                    return self._show_address_form({"base": "cannot_connect"})
                 errors["base"] = "cannot_connect"
             else:
                 return await self._async_finish(self._discovered_url, robot_ids)

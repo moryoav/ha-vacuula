@@ -4,8 +4,11 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.vacuula import async_remove_entry
 from custom_components.vacuula.client import CannotConnect, VacuulaError
 from custom_components.vacuula.const import DOMAIN, GEN4
 from custom_components.vacuula.coordinator import VacuulaCoordinator
@@ -51,7 +54,9 @@ async def test_fresh_promoted_map_is_saved_before_upload(boundary_coordinator):
         call.async_maps("robot"),
         call.async_map_action("robot", "map1", "boundaries", BOUNDARIES),
         call.async_map_action("robot", "map1", "promote"),
+        call.async_maps("robot"),
     ]
+    assert not coordinator.entry.options["pending_map_promotions"]
 
 
 async def test_inactive_map_is_saved_without_becoming_active(boundary_coordinator):
@@ -81,9 +86,19 @@ async def test_failed_promotion_cannot_be_reported_as_success(boundary_coordinat
     coordinator = boundary_coordinator
     failure = VacuulaError("Robot rejected map promotion")
     coordinator.client.async_map_action.side_effect = [{"saved": True}, failure]
-    with pytest.raises(VacuulaError) as caught:
+    coordinator.client.async_maps.side_effect = [
+        [{"id": "map1", "promoted": True}],
+        [{"id": "map1", "promoted": False}],
+    ]
+    with pytest.raises(HomeAssistantError) as caught:
         await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
-    assert caught.value is failure
+    assert caught.value.translation_key == "map_promotion_failed"
+    assert caught.value.__cause__ is failure
+    assert coordinator.robots["robot"].maps == [{"id": "map1", "promoted": False}]
+    assert coordinator.entry.options["pending_map_promotions"] == {"robot": "map1"}
+    with pytest.raises(ServiceValidationError) as blocked:
+        coordinator.validate_map_recovery("robot")
+    assert blocked.value.translation_key == "map_promotion_required"
     assert coordinator.client.async_map_action.await_args_list == [
         call("robot", "map1", "boundaries", BOUNDARIES),
         call("robot", "map1", "promote"),
@@ -160,7 +175,7 @@ async def test_other_commands_cannot_interleave_with_map_transaction(
             assert not competitor.done()
             release_stage.set()
             await asyncio.gather(transaction, competitor)
-        assert operations == ["maps", "boundaries", "promote", "command"]
+        assert operations == ["maps", "boundaries", "promote", "maps", "command"]
         coordinator.client.async_command.assert_awaited_once_with(
             "robot", {"ability": "state.show"}
         )
@@ -171,3 +186,91 @@ async def test_other_commands_cannot_interleave_with_map_transaction(
             if not task.done():
                 task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def test_pending_upload_survives_reload_and_clears_after_confirmed_recovery(
+    boundary_coordinator,
+):
+    coordinator = boundary_coordinator
+    coordinator._set_pending_promotion("robot", "map1")
+    replacement = VacuulaCoordinator(
+        coordinator.hass, coordinator.entry, coordinator.client
+    )
+    replacement.robots = coordinator.robots
+    with pytest.raises(ServiceValidationError):
+        replacement.validate_map_recovery("robot")
+    issue_id = f"{coordinator.entry.entry_id}_robot_map_promotion"
+    assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id)
+    await replacement.async_map_operation("robot", "map1", "promote")
+    replacement.validate_map_recovery("robot")
+    assert not coordinator.entry.options["pending_map_promotions"]
+    assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+@pytest.mark.parametrize("readback", [CannotConnect("Read failed"), []])
+async def test_unverified_promotion_keeps_repair_and_guard(
+    boundary_coordinator, readback
+):
+    coordinator = boundary_coordinator
+    coordinator.client.async_maps.side_effect = [
+        [{"id": "map1", "promoted": True}],
+        readback,
+    ]
+    with pytest.raises(HomeAssistantError) as caught:
+        await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
+    assert caught.value.translation_key == "map_promotion_failed"
+    assert coordinator.robots["robot"].maps == []
+    with pytest.raises(ServiceValidationError):
+        coordinator.validate_map_recovery("robot")
+
+
+async def test_failed_promotion_and_failed_readback_clear_stale_active_map(
+    boundary_coordinator,
+):
+    coordinator = boundary_coordinator
+    coordinator.client.async_maps.side_effect = [
+        [{"id": "map1", "promoted": True}],
+        CannotConnect("Read failed"),
+    ]
+    coordinator.client.async_map_action.side_effect = [{}, CannotConnect("Timed out")]
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
+    assert coordinator.robots["robot"].maps == []
+    assert coordinator.robots["robot"].capabilities["maps_available"] is False
+    assert coordinator.client.async_map_action.await_count == 2
+
+
+async def test_cancelled_promotion_leaves_persistent_recovery_guard(
+    boundary_coordinator,
+):
+    coordinator = boundary_coordinator
+    coordinator.client.async_map_action.side_effect = [{}, asyncio.CancelledError()]
+    with pytest.raises(asyncio.CancelledError):
+        await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
+    assert coordinator.entry.options["pending_map_promotions"] == {"robot": "map1"}
+    assert coordinator.robots["robot"].maps == []
+    assert coordinator.robots["robot"].capabilities["maps_available"] is False
+    with pytest.raises(ServiceValidationError):
+        coordinator.validate_map_recovery("robot")
+
+
+async def test_failed_standalone_promotion_exposes_demoted_state(boundary_coordinator):
+    coordinator = boundary_coordinator
+    coordinator.client.async_map_action.side_effect = CannotConnect("Upload timed out")
+    coordinator.client.async_maps.return_value = [{"id": "map1", "promoted": False}]
+    with pytest.raises(HomeAssistantError) as caught:
+        await coordinator.async_map_operation("robot", "map1", "promote")
+    assert caught.value.translation_key == "map_promotion_failed"
+    assert coordinator.robots["robot"].maps == [{"id": "map1", "promoted": False}]
+    with pytest.raises(ServiceValidationError):
+        coordinator.validate_map_recovery("robot")
+    coordinator.client.async_map_action.assert_awaited_once()
+
+
+async def test_removing_server_cleans_up_its_persistent_repair(boundary_coordinator):
+    coordinator = boundary_coordinator
+    coordinator._set_pending_promotion("robot", "map1")
+    issue_id = f"{coordinator.entry.entry_id}_robot_map_promotion"
+    assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id)
+    await async_remove_entry(coordinator.hass, coordinator.entry)
+    assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None

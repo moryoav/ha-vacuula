@@ -122,7 +122,7 @@ async def test_duplicate_advertisements_offer_one_confirmation(hass, search, api
     api.return_value.async_server_info.assert_awaited_once()
 
 
-async def test_only_configured_server_aborts_without_address_form(hass, search, api):
+async def test_only_configured_server_allows_adding_another_server(hass, search, api):
     MockConfigEntry(
         domain=DOMAIN,
         data={"url": "http://192.0.2.1:8099", "robot_ids": ["EXISTING-robot"]},
@@ -131,9 +131,109 @@ async def test_only_configured_server_aborts_without_address_form(hass, search, 
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    api.assert_not_called()
+
+    with patch("custom_components.vacuula.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"url": "http://192.0.2.2:81"}
+        )
+        await hass.async_block_till_done()
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"] == {
+        "url": "http://192.0.2.2:81",
+        "robot_ids": ["NEW-robot"],
+    }
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 2
+    search.assert_awaited_once()
+
+
+@pytest.mark.parametrize("multiple", [False, True])
+async def test_unreachable_advertisement_allows_a_working_address(
+    hass, search, api, multiple
+):
+    search.return_value = [advertised_server()]
+    if multiple:
+        search.return_value.append(advertised_server("192.0.2.2"))
+    api.return_value.async_server_info.side_effect = CannotConnect("unreachable")
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    if multiple:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"url": "http://192.0.2.1:8099"}
+        )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "cannot_connect"}
+    url_key = next(iter(result["data_schema"].schema))
+    assert url_key.default() == "http://192.0.2.1:8099"
+
+    api.return_value.async_server_info.side_effect = None
+    with patch("custom_components.vacuula.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"url": "http://192.0.2.3:81"}
+        )
+        await hass.async_block_till_done()
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"] == {
+        "url": "http://192.0.2.3:81",
+        "robot_ids": ["NEW-robot"],
+    }
+    assert result["result"].unique_id == "http://192.0.2.3:81"
+    search.assert_awaited_once()
+
+
+async def test_unreachable_advertisement_fallback_preserves_duplicate_prevention(
+    hass, search, api
+):
+    MockConfigEntry(
+        domain=DOMAIN,
+        data={"url": "http://192.0.2.3:81", "robot_ids": ["NEW-robot"]},
+    ).add_to_hass(hass)
+    search.return_value = [advertised_server()]
+    api.return_value.async_server_info.side_effect = CannotConnect("unreachable")
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    assert result["step_id"] == "user"
+    api.return_value.async_server_info.side_effect = None
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url": "http://192.0.2.3:81"}
+    )
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "already_configured"
-    api.assert_not_called()
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_discovered_robot_identity_duplicate_offers_another_address(
+    hass, search, api
+):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"url": "http://192.0.2.3:81", "robot_ids": ["NEW-robot"]},
+    )
+    entry.add_to_hass(hass)
+    search.return_value = [advertised_server()]
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert entry.data["url"] == "http://192.0.2.1:8099"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+    api.return_value.async_robots.return_value = {"OTHER-robot": {}}
+    with patch("custom_components.vacuula.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"url": "http://192.0.2.4:81"}
+        )
+        await hass.async_block_till_done()
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 2
 
 
 async def test_configured_servers_are_excluded_from_selection(hass, search, api):
@@ -159,7 +259,10 @@ async def test_malformed_advertisement_falls_back_to_address_form(hass, search, 
     api.assert_not_called()
 
 
-async def test_confirmation_connection_failure_can_retry_without_url(hass, search, api):
+@pytest.mark.parametrize("same_url", [True, False])
+async def test_confirmation_connection_failure_allows_address_retry(
+    hass, search, api, same_url
+):
     search.return_value = [advertised_server()]
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
@@ -168,13 +271,22 @@ async def test_confirmation_connection_failure_can_retry_without_url(hass, searc
     api.return_value.async_server_info.side_effect = CannotConnect("server offline")
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
-    assert_confirmation(result)
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
     assert result["errors"] == {"base": "cannot_connect"}
+    flow = hass.config_entries.flow.async_get(result["flow_id"])
+    assert "confirm_only" not in flow["context"]
 
     api.return_value.async_server_info.side_effect = None
-    result = await finish_setup(hass, result)
+    base_url = "http://192.0.2.1:8099" if same_url else "http://192.0.2.3:81"
+    with patch("custom_components.vacuula.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"url": base_url}
+        )
+        await hass.async_block_till_done()
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"]["url"] == "http://192.0.2.1:8099"
+    assert result["data"]["url"] == base_url
+    assert ("url_aliases" in result["data"]) is same_url
     search.assert_awaited_once()
 
 

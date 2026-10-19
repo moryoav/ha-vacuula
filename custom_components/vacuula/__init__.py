@@ -6,6 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
@@ -56,6 +57,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: VacuulaConfigEntry) -> 
     if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         await entry.runtime_data.async_stop()
     return unloaded
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: VacuulaConfigEntry) -> None:
+    """Remove persistent floorplan notices when their server entry is removed."""
+    for serial in entry.options.get("pending_map_promotions", {}):
+        ir.async_delete_issue(hass, DOMAIN, f"{entry.entry_id}_{serial}_map_promotion")
 
 
 async def async_remove_config_entry_device(

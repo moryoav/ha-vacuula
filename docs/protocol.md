@@ -102,11 +102,16 @@ adds dimensions. Generation 4 `cleaning.start` uses `runs`, each containing
 `nogo_enabled`.
 
 New runs use Automatic map selection by default. Before selecting a map the
-integration refreshes the stored map list. With saved maps, Gen3 uses category
+integration refreshes the stored map list. While docked with an active map, Gen3 uses category
 `4` and lets the robot match its dock against enabled maps, as the app does.
 Gen4 uses the unique promoted floorplan ID with `nogo_enabled: true`. A saved
-map that cannot safely be selected causes an action error; it never triggers
-a silent mapless fallback. Explicit house and spot controls remain mapless.
+map is used only when enabled (Gen3) or promoted (Gen4). Automatic falls back
+to mapless whole-home cleaning when no map is active or the robot is off dock,
+matching `home.tsx`. The Saved map default (`cleaning_type: map` without a
+`map_id`) rejects these conditions. An explicit map-ID action supplies that ID
+directly to the robot rather than running automatic active-map/dock selection.
+Malformed maps, ambiguous promoted maps and failed reads remain errors.
+Explicit house and spot controls remain mapless.
 
 Returning to base pauses a pausable run, waits 3.5 seconds and re-reads command
 readiness before sending the docking command. The entire sequence holds the
@@ -127,12 +132,34 @@ inputs using Home Assistant's configured timezone and the current UTC offset,
 including weekday rollover, matching the app's `utils/clockTime.ts` behavior.
 `time_basis: utc` accepts raw events without conversion. `get_data` keeps raw
 UTC schedule responses. A DST offset change requires rewriting local schedules.
+The source's Gen3 `ScheduleEvent` type declares `boundaryId`, but its renderer
+reads `event.boundary.name`; no captured zone schedule establishes the robot's
+exact response. The integration accepts a nested boundary only with a valid
+explicit `id`, normalizes it to `boundaryId`, and rejects unresolved or
+conflicting IDs before replacing the schedule. This compatibility shape is
+fixture-tested, not a claim of hardware verification.
+
+Gen4 schedule creation defaults to the unique promoted floorplan and enabled
+no-go protection. Current docking does not affect this future cleaning command.
+No promoted map means whole-home cleaning, unless explicit mapped cleaning was
+requested. Explicit `cleaning_type: house` stores mapless cleaning. The map ID
+is selected when writing the event; the robot does not reselect it at run time.
 
 Gen4 HTTP boundary replacement stores data on the server. For an already
 promoted map, the integration saves then re-promotes it under one robot lock so
 the robot receives updated zones. Fresh map metadata determines active status;
 inactive maps stay inactive. Save failure prevents promotion, and promotion
 failure is reported even though the server may already have stored boundaries.
+The server demotes the active floorplan before upload; failure can therefore
+remove active no-go protection. Before promotion, the integration persists a
+pending marker in entry options. It reads map status back after success/failure
+and raises a persistent repair notice until a successful `map_action: promote`
+and a fresh promoted-map readback confirm recovery. It does not retry commands
+or attempt an unconfirmed rollback. Pending recovery blocks new Automatic/map
+starts and new/updated Automatic or mapped Gen4 schedule commands, including
+after reload/restart. Explicit house cleaning and schedules remain available;
+existing robot schedules, event-enabled switches and outside controls are
+unaffected. Unreadable status invalidates the stale promoted-map cache.
 
 Generation 3 map-enabled switches use the app's map update endpoint, preserving
 the cached map name. Generation 4 event-enabled switches send `scheduling.update`

@@ -14,6 +14,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -49,6 +50,11 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             for serial, options in entry.options.get("cleaning_options", {}).items()
             if isinstance(options, dict)
         }
+        self._pending_promotions: dict[str, str] = dict(
+            entry.options.get("pending_map_promotions", {})
+        )
+        for serial in self._pending_promotions:
+            self._create_promotion_issue(serial)
         self._locks: dict[str, asyncio.Lock] = {}
         self._streams: dict[str, asyncio.Task[None]] = {}
         self._server_stream: asyncio.Task[None] | None = None
@@ -321,7 +327,89 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
     ) -> Any:
         """Serialize map operations that can upload data or command the robot."""
         async with self._lock(serial):
-            return await self.client.async_map_action(serial, map_id, action, payload)
+            if action != "promote":
+                return await self.client.async_map_action(
+                    serial, map_id, action, payload
+                )
+            self._set_pending_promotion(serial, map_id)
+            try:
+                result = await self.client.async_map_action(
+                    serial, map_id, action, payload
+                )
+            except VacuulaError as err:
+                with suppress(VacuulaError):
+                    await self._async_read_maps_locked(serial)
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="map_promotion_failed"
+                ) from err
+            await self._async_confirm_promotion_locked(serial, map_id)
+            return result
+
+    def _create_promotion_issue(self, serial: str) -> None:
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"{self.entry.entry_id}_{serial}_map_promotion",
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="map_promotion_required",
+        )
+
+    def _set_pending_promotion(self, serial: str, map_id: str | None) -> None:
+        pending = dict(self._pending_promotions)
+        if map_id is None:
+            pending.pop(serial, None)
+            ir.async_delete_issue(
+                self.hass, DOMAIN, f"{self.entry.entry_id}_{serial}_map_promotion"
+            )
+        else:
+            pending[serial] = map_id
+            self._create_promotion_issue(serial)
+            self.robots[serial].maps = []
+            self.robots[serial].capabilities["maps_available"] = False
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, "pending_map_promotions": pending},
+        )
+        self._pending_promotions = pending
+        self.async_set_updated_data(self.robots)
+
+    def validate_map_recovery(self, serial: str) -> None:
+        """Do not silently bypass no-go zones after a known failed map upload."""
+        if serial in self._pending_promotions:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="map_promotion_required"
+            )
+
+    async def _async_read_maps_locked(self, serial: str) -> None:
+        robot = self.robots[serial]
+        try:
+            robot.maps = await self.client.async_maps(serial)
+            robot.capabilities["maps_available"] = True
+        except VacuulaError:
+            if serial in self._pending_promotions:
+                robot.maps = []
+                robot.capabilities["maps_available"] = False
+            raise
+        finally:
+            self.async_set_updated_data(self.robots)
+
+    async def _async_confirm_promotion_locked(self, serial: str, map_id: str) -> None:
+        try:
+            await self._async_read_maps_locked(serial)
+        except VacuulaError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="map_promotion_failed"
+            ) from err
+        if not any(
+            item.get("id") == map_id and item.get("promoted") is True
+            for item in self.robots[serial].maps
+        ):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="map_promotion_failed"
+            )
+        self._set_pending_promotion(serial, None)
 
     async def async_set_map_boundaries(
         self, serial: str, map_id: str, boundaries: list[dict[str, Any]]
@@ -336,7 +424,21 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 serial, map_id, "boundaries", boundaries
             )
             if floor_map.get("promoted") is True:
-                await self.client.async_map_action(serial, map_id, "promote")
+                # The server demotes first. Persist before awaiting promotion so
+                # cancellation or a restart cannot conceal missing no-go zones.
+                self._set_pending_promotion(serial, map_id)
+                try:
+                    await self.client.async_map_action(serial, map_id, "promote")
+                except VacuulaError as err:
+                    with suppress(VacuulaError):
+                        await self._async_read_maps_locked(serial)
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="map_promotion_failed",
+                    ) from err
+                await self._async_confirm_promotion_locked(serial, map_id)
+            else:
+                await self._async_read_maps_locked(serial)
             return result
 
     async def async_refresh_maps(self, serial: str) -> None:
@@ -395,7 +497,12 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 setattr(robot, attribute, value)
 
     async def async_command(
-        self, serial: str, command: dict[str, Any], *, refresh: bool = True
+        self,
+        serial: str,
+        command: dict[str, Any],
+        *,
+        refresh: bool = True,
+        require_map_recovery: bool = False,
     ) -> dict[str, Any]:
         """Execute exactly once, serialize commands and confirm state afterwards."""
         if serial not in self.robots or not self.robots[serial].connected:
@@ -403,6 +510,8 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 translation_domain=DOMAIN, translation_key="offline"
             )
         async with self._lock(serial):
+            if require_map_recovery:
+                self.validate_map_recovery(serial)
             try:
                 if command.get("cmd") == "setPreferences":
                     # Read and merge under the same lock as the write so two

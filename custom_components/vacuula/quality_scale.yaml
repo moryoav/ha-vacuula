@@ -64,9 +64,7 @@ rules:
   exception-translations: done
   icon-translations: done
   reconfiguration-flow: done
-  repair-issues:
-    status: exempt
-    comment: No persistent repair condition is identified; transient connectivity uses setup retry and entity availability.
+  repair-issues: done
   stale-devices: done
 
   # Platinum

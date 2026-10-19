@@ -1,0 +1,187 @@
+clean:
+  name: Clean a map or zone
+  description: Start a cleaning run with explicit settings. Generation 3 supports one zone per action.
+  fields:
+    device_id: &device
+      name: Robot
+      required: true
+      selector:
+        device:
+          integration: vacuula
+    map_id: &map
+      name: Map ID
+      selector:
+        text:
+    zone_ids:
+      name: Zone IDs
+      description: Boundary IDs from the selected map. Leave empty to clean the whole map.
+      selector:
+        object:
+    mode:
+      name: Cleaning mode
+      default: eco
+      selector:
+        select:
+          options: [eco, turbo, auto, max]
+    navigation:
+      name: Navigation mode
+      default: normal
+      selector:
+        select:
+          options: [normal, extra_care, deep, gentle]
+    nogo_enabled:
+      name: Respect no-go boundaries
+      default: true
+      selector:
+        boolean:
+set_schedule:
+  name: Replace schedule
+  description: Replace all Generation 3 schedule events. This does not enable the schedule. An empty list removes all events.
+  fields:
+    device_id: *device
+    events:
+      name: Events
+      required: true
+      description: List of mode (1 eco, 2 turbo), day (0 Sunday to 6 Saturday), startTime (HH:MM), and optional boundaryId.
+      selector:
+        object:
+update_schedule_event:
+  name: Add or update schedule event
+  description: Add or update a Generation 4 schedule event. Times use the robot's configured timezone.
+  fields:
+    device_id: *device
+    event_id:
+      name: Existing event ID
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      required: true
+      selector:
+        boolean:
+    days:
+      name: Days
+      required: true
+      selector:
+        select:
+          multiple: true
+          options: [mon, tue, wed, thu, fri, sat, sun]
+    time:
+      name: Start time (HH:MM)
+      required: true
+      selector:
+        text:
+    map_id: *map
+    zone_ids:
+      name: Zone IDs
+      selector:
+        object:
+    mode:
+      name: Cleaning mode
+      default: eco
+      selector:
+        select:
+          options: [eco, turbo, auto, max]
+    navigation:
+      name: Navigation mode
+      default: normal
+      selector:
+        select:
+          options: [normal, gentle]
+    nogo_enabled:
+      name: Respect no-go boundaries
+      default: true
+      selector:
+        boolean:
+delete_schedule_event:
+  name: Delete schedule event
+  description: Remove one Generation 4 schedule event.
+  fields:
+    device_id: *device
+    event_id:
+      name: Event ID
+      required: true
+      selector:
+        text:
+set_boundaries:
+  name: Replace map boundaries
+  description: Replace the complete boundary list on a map. An empty list removes all boundaries. Use get_data to read the current boundaries first.
+  fields:
+    device_id: *device
+    map_id:
+      <<: *map
+      required: true
+    boundaries:
+      name: Boundaries
+      required: true
+      selector:
+        object:
+rename_robot:
+  name: Rename robot
+  description: Change the robot's name in Vacuula.
+  fields:
+    device_id: *device
+    name:
+      name: New name
+      required: true
+      selector:
+        text:
+update_map:
+  name: Update map
+  description: Change a map's name and Generation 3 enabled setting.
+  fields:
+    device_id: *device
+    map_id:
+      <<: *map
+      required: true
+    name:
+      name: Map name
+      required: true
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      required: true
+      selector:
+        boolean:
+map_action:
+  name: Manage floorplan
+  description: Promote, include, exclude or demote a Generation 4 map. Demote removes its active floorplan status.
+  fields:
+    device_id: *device
+    map_id:
+      <<: *map
+      required: true
+    action:
+      name: Action
+      required: true
+      selector:
+        select:
+          options: [promote, use, unuse, demote]
+get_data:
+  name: Read robot data
+  description: Return structured robot data, maps, run history or boundaries for use in scripts. Requires a response variable.
+  fields:
+    device_id: *device
+    resource:
+      name: Resource
+      required: true
+      selector:
+        select:
+          options: [state, info, stats, preferences, schedule, maps, runs, map, run, boundaries, log_upload_state]
+    map_id: *map
+    run_id:
+      name: Run ID
+      selector:
+        text:
+factory_reset:
+  name: Factory reset
+  description: Erase Generation 4 robot settings. The robot may need provisioning again. This action requires explicit confirmation.
+  fields:
+    device_id: *device
+    confirm:
+      name: Confirm factory reset
+      required: true
+      default: false
+      selector:
+        boolean:

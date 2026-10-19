@@ -1,0 +1,8 @@
+# Tested with Python 3.14 and Home Assistant 2026.10.2 on Linux.
+homeassistant==2026.10.2
+pytest-homeassistant-custom-component==0.13.373
+pytest==9.0.3
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+ruff==0.16.6
+mypy==2.3.1

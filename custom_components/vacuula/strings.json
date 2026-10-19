@@ -1,0 +1,365 @@
+{
+  "title": "Vacuula",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Vacuula",
+        "description": "Enter the address of the existing Vacuula server. All registered robots will be added automatically. Setup only reads robot data.",
+        "data": {
+          "url": "Server URL"
+        },
+        "data_description": {
+          "url": "The HTTP or HTTPS address and app port. Use the app's direct address, without /web or an ingress path."
+        }
+      },
+      "confirm": {
+        "title": "Vacuula server discovered",
+        "description": "Connect Home Assistant to this local Vacuula server and add its robots?"
+      },
+      "reconfigure": {
+        "title": "Change Vacuula server address",
+        "description": "Enter the new address of the same server. Existing entity identities will be kept.",
+        "data": {
+          "url": "Server URL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to Vacuula. Check that the app is running and its direct HTTP port is accessible.",
+      "invalid_url": "Enter an HTTP or HTTPS address with a port if needed, without a path, credentials or query parameters.",
+      "wrong_server": "This server contains different robots. Add it as another integration instead."
+    },
+    "abort": {
+      "already_configured": "This server or one of its robots is already configured.",
+      "cannot_connect": "Unable to connect to the discovered Vacuula server.",
+      "reconfigure_successful": "Vacuula server address updated."
+    }
+  },
+  "exceptions": {
+    "action_unavailable": {
+      "message": "The robot cannot perform this action in its current state."
+    },
+    "invalid_option": {
+      "message": "This setting is not supported by the robot."
+    },
+    "offline": {
+      "message": "The robot is offline. Check its connection in Vacuula."
+    },
+    "command_failed": {
+      "message": "Vacuula could not confirm the action. Check the app and the robot's current state before trying again."
+    },
+    "unknown_robot": {
+      "message": "Choose a robot managed by the Vacuula integration."
+    },
+    "entry_not_loaded": {
+      "message": "The selected Vacuula integration is not loaded."
+    },
+    "unsupported_action": {
+      "message": "This action or setting is not supported by this robot."
+    },
+    "map_required": {
+      "message": "Provide a map ID for this action."
+    },
+    "run_required": {
+      "message": "Provide a run ID for this action."
+    },
+    "single_zone_only": {
+      "message": "Generation 3 robots support one verified zone per cleaning action."
+    },
+    "invalid_boundary": {
+      "message": "The boundary data is invalid for this robot generation."
+    },
+    "confirmation_required": {
+      "message": "Factory reset erases robot settings. Set confirm to true only when you intend to reset the robot."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "Connection"
+      },
+      "charging": {
+        "name": "Charging"
+      },
+      "docked": {
+        "name": "Docked"
+      },
+      "dock_seen": {
+        "name": "Dock has been seen"
+      },
+      "problem": {
+        "name": "Problem"
+      },
+      "dustbin_missing": {
+        "name": "Dustbin missing"
+      },
+      "dustbin_full": {
+        "name": "Dustbin full"
+      },
+      "quickboost": {
+        "name": "Quick boost"
+      },
+      "started_on_base": {
+        "name": "Cleaning started on base"
+      },
+      "extracting": {
+        "name": "Extracting"
+      },
+      "can_start": {
+        "name": "Ready to start"
+      },
+      "can_stop": {
+        "name": "Ready to stop"
+      },
+      "can_pause": {
+        "name": "Ready to pause"
+      },
+      "can_resume": {
+        "name": "Ready to resume"
+      },
+      "can_return_to_base": {
+        "name": "Ready to return to base"
+      },
+      "telemetry": {
+        "name": "{label}"
+      }
+    },
+    "button": {
+      "start": {
+        "name": "Start cleaning"
+      },
+      "stop": {
+        "name": "Stop cleaning"
+      },
+      "pause": {
+        "name": "Pause cleaning"
+      },
+      "resume": {
+        "name": "Resume cleaning"
+      },
+      "return_to_base": {
+        "name": "Return to base"
+      },
+      "locate": {
+        "name": "Locate"
+      },
+      "refresh": {
+        "name": "Refresh data"
+      },
+      "dismiss_alert": {
+        "name": "Dismiss alert"
+      },
+      "clean_spot": {
+        "name": "Spot clean"
+      },
+      "explore": {
+        "name": "Explore for a new map"
+      },
+      "upload_logs": {
+        "name": "Upload robot logs"
+      }
+    },
+    "switch": {
+      "robot_sounds": {
+        "name": "Robot sounds"
+      },
+      "schedule": {
+        "name": "Schedule"
+      },
+      "force_floorplan": {
+        "name": "Require floor plan"
+      },
+      "map_enabled": {
+        "name": "Map {map_name} enabled"
+      },
+      "schedule_event_enabled": {
+        "name": "Schedule {event_name} enabled"
+      }
+    },
+    "number": {
+      "bin_reminder": {
+        "name": "Dustbin reminder interval"
+      },
+      "filter_reminder": {
+        "name": "Filter change reminder interval"
+      },
+      "brush_reminder": {
+        "name": "Brush change reminder interval"
+      },
+      "spot_height": {
+        "name": "Spot clean height"
+      },
+      "spot_width": {
+        "name": "Spot clean width"
+      }
+    },
+    "select": {
+      "cleaning_mode": {
+        "name": "Cleaning mode",
+        "state": {
+          "eco": "Eco",
+          "turbo": "Turbo",
+          "max": "Max",
+          "auto": "Auto"
+        }
+      },
+      "navigation_mode": {
+        "name": "Navigation mode",
+        "state": {
+          "normal": "Normal",
+          "extra_care": "Extra care",
+          "deep": "Deep",
+          "gentle": "Gentle"
+        }
+      },
+      "cleaning_category": {
+        "name": "Cleaning type",
+        "state": {
+          "house": "Whole home",
+          "spot": "Spot"
+        }
+      },
+      "robot_language": {
+        "name": "Robot language"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "robot_state": {
+        "name": "Robot state",
+        "state": {
+          "invalid": "Invalid",
+          "idle": "Idle",
+          "busy": "Busy",
+          "paused": "Paused",
+          "error": "Error"
+        }
+      },
+      "robot_action": {
+        "name": "Robot action"
+      },
+      "error": {
+        "name": "Error"
+      },
+      "alert": {
+        "name": "Alert"
+      },
+      "active_cleaning_mode": {
+        "name": "Active cleaning mode",
+        "state": {
+          "eco": "Eco",
+          "turbo": "Turbo"
+        }
+      },
+      "active_navigation_mode": {
+        "name": "Active navigation mode",
+        "state": {
+          "normal": "Normal",
+          "extra_care": "Extra care",
+          "deep": "Deep"
+        }
+      },
+      "active_cleaning_category": {
+        "name": "Active cleaning type",
+        "state": {
+          "manual": "Manual",
+          "house": "Whole home",
+          "spot": "Spot",
+          "map": "Map"
+        }
+      },
+      "active_cleaning_modifier": {
+        "name": "Active cleaning modifier",
+        "state": {
+          "normal": "Normal",
+          "double": "Double"
+        }
+      },
+      "active_spot_height": {
+        "name": "Active spot height"
+      },
+      "active_spot_width": {
+        "name": "Active spot width"
+      },
+      "time_to_empty": {
+        "name": "Battery remaining estimate (raw)"
+      },
+      "time_to_full_charge": {
+        "name": "Full charge estimate (raw)"
+      },
+      "battery_total_charges": {
+        "name": "Battery charge count"
+      },
+      "battery_manufacturing_date": {
+        "name": "Battery manufacturing date"
+      },
+      "battery_vendor": {
+        "name": "Battery vendor"
+      },
+      "battery_authorization": {
+        "name": "Battery authorization status"
+      },
+      "product_number": {
+        "name": "Product number"
+      },
+      "base_type": {
+        "name": "Base type"
+      },
+      "bag_status": {
+        "name": "Base bag status"
+      },
+      "base_error": {
+        "name": "Base error"
+      },
+      "autonomy": {
+        "name": "Autonomy {label}"
+      },
+      "local_statistic": {
+        "name": "Local statistic {label}"
+      },
+      "map_count": {
+        "name": "Saved maps"
+      },
+      "run_count": {
+        "name": "Saved cleaning records"
+      },
+      "schedule_event_count": {
+        "name": "Scheduled cleanings"
+      },
+      "last_run_area": {
+        "name": "Last cleaning area"
+      },
+      "last_run_duration": {
+        "name": "Last cleaning duration"
+      },
+      "last_run_started": {
+        "name": "Last cleaning started"
+      },
+      "last_run_finished": {
+        "name": "Last cleaning finished"
+      },
+      "last_run_status": {
+        "name": "Last cleaning status"
+      },
+      "last_run_started_by": {
+        "name": "Last cleaning started by"
+      },
+      "last_run_battery_used": {
+        "name": "Last cleaning battery used"
+      },
+      "last_run_pickups": {
+        "name": "Last cleaning pickups"
+      },
+      "telemetry": {
+        "name": "{label}"
+      }
+    },
+    "image": {
+      "floor_map": {
+        "name": "Map {map_name}"
+      }
+    }
+  }
+}

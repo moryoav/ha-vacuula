@@ -1,0 +1,33 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+branch = true
+source = ["custom_components/vacuula"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["ASYNC109"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["custom_components.vacuula"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+explicit_package_bases = true
+files = ["custom_components/vacuula"]
+
+[[tool.mypy.overrides]]
+module = ["homeassistant.*"]
+implicit_reexport = true

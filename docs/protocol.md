@@ -1,0 +1,149 @@
+# Local app protocol
+
+This integration communicates with the local Vacuula app API. It does not speak
+the robot's provisioning, cloud, or TLS transport protocols directly. The client
+is an independent asynchronous implementation of the observed HTTP interface.
+Vacuula implementation code is not included.
+
+## Evidence and compatibility
+
+The reference is the Vacuula source snapshot associated with revision `bf18585`,
+reviewed on 2026-10-19. Relevant files are `app/src/http.ts`,
+`app/src/http/gen3.ts`, `app/src/http/gen4.ts`, the app's generation-specific
+types, and `server/src/vacuula_server/handlers/{app,events,route_matcher}.py`.
+The [upstream project](https://github.com/vacuula/vacuula) remains the authority
+for its own protocol; these notes describe the reviewed interface, not a stable
+API guarantee.
+
+D5 state and optional telemetry were verified with read-only requests.
+Generation 4 behavior is source-verified and fixture-tested, without hardware
+verification. Generation 3 multi-boundary cleaning was explicitly questioned in
+the app source; this integration accepts only a single `boundaryId`.
+
+## HTTP and events
+
+All paths below are relative to the configured origin. IDs occupy one URL path
+segment and are percent-encoded. The integration accepts only a plain HTTP or
+HTTPS origin without user information, a path prefix, query, or fragment.
+Requests do not follow redirects. The direct app API requires no authentication;
+there is no integration support for an authenticated reverse proxy.
+
+| Method | Path | Purpose and response |
+| --- | --- | --- |
+| GET | `/api/server` | Server facts as an object, including version and timezone. |
+| GET | `/api/robots` | Object keyed by robot serial, with generation, name, and connection status. |
+| GET | `/api/events` | SSE stream; `robots` events contain complete robot snapshots. |
+| GET | `/api/robot/{serial}/connect` | Per-robot SSE stream with event objects containing `serial` and `data`. |
+| POST | `/api/robot/{serial}/command` | Send a Generation 3 `cmd` or Generation 4 `ability` object and await its response. |
+| POST | `/api/robot/{serial}` | Update the server-side robot name with `{name}`. |
+| GET | `/api/robot/{serial}/maps` | List stored maps. |
+| GET | `/api/robot/{serial}/maps/{map_id}` | Read floor-grid data and map metadata. |
+| POST | `/api/robot/{serial}/maps/{map_id}` | Update `{name, enabled}`; Generation 4 uses the name. |
+| GET | `/api/robot/{serial}/runs` | List recorded cleaning runs. |
+| GET | `/api/robot/{serial}/run/{run_id}` | Read one stored run map. The path uses singular `run`. |
+| GET | `/api/robot/{serial}/maps/{map_id}/boundaries` | Read Generation 4 boundaries. Generation 3 uses `getMapBoundaries`. |
+| POST | `/api/robot/{serial}/maps/{map_id}/boundaries` | Replace Generation 4 boundaries with an array. |
+| POST | `/api/robot/{serial}/maps/{map_id}/{action}` | Generation 4 `promote`, `use`, or `unuse`. |
+| DELETE | `/api/robot/{serial}/maps/{map_id}` | Generation 4 floorplan demotion. |
+
+Metadata writes can return literal `OK` rather than JSON. Reads validate that
+the response has the expected object or list shape. Generation 3 command replies
+must include `result: ok`; Generation 4 replies must include an integer success
+`code`. Robot-level errors are checked even when HTTP status is 200. A response
+`body` is unwrapped for Generation 4; Generation 3 `data` is merged with root
+state fields so battery and action values are preserved.
+
+SSE supports LF, CRLF, and CR line endings, comments, a UTF-8 BOM, network chunks
+that divide frames, and multiline `data` fields. Server robot snapshots are
+filtered by the `robots` event name. A robot stream is subscribed before its
+initial state read, avoiding a gap between the read and subscription. Generation
+3 state events use `type: state` or `eventId: 77`. Generation 4 state and error
+messages identify `peer.state` or `robots.error_codes` in `to.service`.
+
+## Generation command mapping
+
+The integration exposes validated entity controls and ten named Home Assistant
+actions. It intentionally does not offer an arbitrary raw-command action.
+The ten advanced actions use Home Assistant's administrator action registration;
+signed-in callers must be administrators. Standard vacuum controls follow normal
+entity permissions, and Home Assistant-managed automations/scripts can call the
+advanced actions.
+
+| Operation | Generation 3 `cmd` | Generation 4 `ability` |
+| --- | --- | --- |
+| State | `getRobotState` | `state.show` |
+| Information | `getGeneralInfo` | `info.robot` |
+| Cleaning statistics | `getLocalStats` | `cleaning.show` |
+| Preferences | `getPreferences`, `setPreferences` | `settings.cleaning_options`, `settings.set_cleaning_options` |
+| Robot language | Not exposed as a Generation 3 language control | `settings.robot_language`, `settings.set_robot_language` |
+| Start | `startCleaning` | `cleaning.start` |
+| Pause / resume | `pauseCleaning`, `resumeCleaning` | `cleaning.pause`, `cleaning.resume` |
+| Stop | `stopCleaning` | `cleaning.cancel` |
+| Return to base | `sendToBase` | `navigation.return_to_base` |
+| Locate | `findMe` | `utilities.find_me` |
+| Read schedule | `getSchedule` | `scheduling.show` |
+| Write schedule | `setSchedule` | `scheduling.update`, `scheduling.delete` |
+| Schedule enabled | `enableSchedule`, `disableSchedule` | Per-event `enabled` |
+| Saved map enabled | App HTTP map update with unchanged name | Not exposed as an enabled switch |
+| Map boundaries | `getMapBoundaries`, `setMapBoundaries` | App HTTP map endpoints |
+| Explore / map | `startPersistentMapExploration` | Not exposed as a separate mapping command |
+| Dismiss alert | `dismissCurrentAlert` | Not exposed |
+| Upload logs / upload state | `uploadLogs`, `getLogsUploadState` | Not exposed |
+| Factory reset | Not exposed | `settings.factory_reset`; explicit action confirmation required |
+
+Generation 3 cleaning uses `params.category` (`2` house, `3` spot, `4` map),
+`mode` (`1` eco, `2` turbo), and `navigationMode` (`1` normal, `2` extra care,
+`3` deep). Zone cleaning adds `mapId` and a single `boundaryId`. Spot cleaning
+adds dimensions. Generation 4 `cleaning.start` uses `runs`, each containing
+`settings` and either `map: null` or a map object with `rank_id`, `track_id`, and
+`nogo_enabled`.
+
+Generation 3 preference writes merge the cached full preferences object before
+applying changed values. This avoids dropping unrelated preference fields.
+Generation 4 settings changes use the operation and keys defined by the app.
+Home Assistant cleaning defaults are stored in config-entry options and do not
+send a robot command until a cleaning action is requested.
+
+Generation 3 map-enabled switches use the app's map update endpoint, preserving
+the cached map name. Generation 4 event-enabled switches send `scheduling.update`
+with the complete existing event and only its `enabled` value changed. Both
+discover new records dynamically and read back changes; absent records become
+unavailable. Map metadata can be updated while a robot is disconnected.
+
+Additional scalar diagnostic entities traverse `state`, `info`, `stats`,
+`active_run`, `last_run`, and `last_subrun`. The latter two select the latest
+record with a valid timezone-aware start timestamp. Booleans are exposed as
+binary sensors; finite numbers and bounded text become sensors without inferred
+units. These entities are disabled by default. Traversal limits nesting depth,
+omits arrays and identity/credential keys, and rejects strings containing URL,
+email, or certificate markers. Path segments are independently encoded in entity
+keys to avoid collisions between nested fields.
+
+## Timing, safety, and privacy
+
+The coordinator owns one server SSE task, one task per connected robot, and an
+independent 60-second polling timer. Details refresh every 300 seconds or after a
+command. Event reconnect delay doubles from 1 second to a 60-second cap.
+Optional commands rejected as unsupported are cached for the entry lifetime.
+Unloading cancels and awaits all event tasks and removes the timer; Home
+Assistant retains ownership of the shared HTTP session.
+
+Normal requests have a 45-second total timeout, a 10-second connect timeout, and
+a 40-second socket-read timeout. SSE has no total timeout, a 10-second connect
+timeout, and a 45-second socket-read timeout. JSON bodies are limited to 16 MiB
+and SSE frames to 2 MiB. Invalid JSON and non-finite JSON numbers are rejected.
+
+Robot commands are serialized per robot. They are never retried automatically,
+including after a timeout, because execution might already have occurred.
+Successful commands trigger a state readback. Map writes first read the map
+under the target robot to check ownership. Action schemas validate identifiers,
+names, generations, settings, and geometry before sending a request. Boundary
+and schedule replacement actions can remove existing data; the factory-reset
+action requires the literal boolean `confirm: true` and Generation 4.
+
+Map images validate dimensions, RLE runs, and a maximum of 4,194,304 pixels;
+rendering runs in Home Assistant's executor. No external image service is used.
+Diagnostics are built from cached, allowlisted telemetry, redact identities and
+URLs, and omit map geometry, run contents, and complete schedule events.
+Structured `get_data` responses are intended for local automation and can
+contain richer private data.

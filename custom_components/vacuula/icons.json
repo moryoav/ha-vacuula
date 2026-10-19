@@ -1,0 +1,213 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "docked": {
+        "default": "mdi:home-import-outline"
+      },
+      "dock_seen": {
+        "default": "mdi:home-search-outline"
+      },
+      "dustbin_full": {
+        "default": "mdi:delete-alert"
+      },
+      "quickboost": {
+        "default": "mdi:battery-charging"
+      },
+      "started_on_base": {
+        "default": "mdi:home-export-outline"
+      },
+      "extracting": {
+        "default": "mdi:air-filter"
+      },
+      "can_start": {
+        "default": "mdi:play-circle-outline"
+      },
+      "can_stop": {
+        "default": "mdi:stop-circle-outline"
+      },
+      "can_pause": {
+        "default": "mdi:pause-circle-outline"
+      },
+      "can_resume": {
+        "default": "mdi:play-pause"
+      },
+      "can_return_to_base": {
+        "default": "mdi:home-import-outline"
+      }
+    },
+    "button": {
+      "start": {
+        "default": "mdi:play"
+      },
+      "stop": {
+        "default": "mdi:stop"
+      },
+      "pause": {
+        "default": "mdi:pause"
+      },
+      "resume": {
+        "default": "mdi:play-pause"
+      },
+      "return_to_base": {
+        "default": "mdi:home-import-outline"
+      },
+      "locate": {
+        "default": "mdi:map-marker-radius"
+      },
+      "refresh": {
+        "default": "mdi:refresh"
+      },
+      "dismiss_alert": {
+        "default": "mdi:bell-check"
+      },
+      "clean_spot": {
+        "default": "mdi:target"
+      },
+      "explore": {
+        "default": "mdi:map-search-outline"
+      },
+      "upload_logs": {
+        "default": "mdi:file-upload-outline"
+      }
+    },
+    "switch": {
+      "robot_sounds": {
+        "default": "mdi:volume-high"
+      },
+      "schedule": {
+        "default": "mdi:calendar-clock"
+      },
+      "force_floorplan": {
+        "default": "mdi:floor-plan"
+      },
+      "map_enabled": {
+        "default": "mdi:floor-plan"
+      },
+      "schedule_event_enabled": {
+        "default": "mdi:calendar-check"
+      }
+    },
+    "number": {
+      "bin_reminder": {
+        "default": "mdi:delete-clock"
+      },
+      "filter_reminder": {
+        "default": "mdi:air-filter"
+      },
+      "brush_reminder": {
+        "default": "mdi:brush"
+      },
+      "spot_height": {
+        "default": "mdi:arrow-expand-vertical"
+      },
+      "spot_width": {
+        "default": "mdi:arrow-expand-horizontal"
+      }
+    },
+    "select": {
+      "cleaning_mode": {
+        "default": "mdi:fan"
+      },
+      "navigation_mode": {
+        "default": "mdi:routes"
+      },
+      "cleaning_category": {
+        "default": "mdi:vacuum"
+      },
+      "robot_language": {
+        "default": "mdi:translate"
+      }
+    },
+    "sensor": {
+      "robot_state": {
+        "default": "mdi:robot-vacuum"
+      },
+      "robot_action": {
+        "default": "mdi:robot-vacuum"
+      },
+      "error": {
+        "default": "mdi:alert-circle-outline"
+      },
+      "alert": {
+        "default": "mdi:bell-alert-outline"
+      },
+      "active_cleaning_mode": {
+        "default": "mdi:fan"
+      },
+      "active_navigation_mode": {
+        "default": "mdi:routes"
+      },
+      "active_cleaning_category": {
+        "default": "mdi:vacuum"
+      },
+      "active_cleaning_modifier": {
+        "default": "mdi:layers"
+      },
+      "active_spot_height": {
+        "default": "mdi:arrow-expand-vertical"
+      },
+      "active_spot_width": {
+        "default": "mdi:arrow-expand-horizontal"
+      },
+      "time_to_empty": {
+        "default": "mdi:battery-clock-outline"
+      },
+      "time_to_full_charge": {
+        "default": "mdi:battery-charging-outline"
+      },
+      "battery_total_charges": {
+        "default": "mdi:counter"
+      },
+      "battery_vendor": {
+        "default": "mdi:factory"
+      },
+      "battery_authorization": {
+        "default": "mdi:shield-check-outline"
+      },
+      "product_number": {
+        "default": "mdi:barcode"
+      },
+      "base_type": {
+        "default": "mdi:home-import-outline"
+      },
+      "bag_status": {
+        "default": "mdi:bag-personal-outline"
+      },
+      "base_error": {
+        "default": "mdi:alert-circle-outline"
+      },
+      "autonomy": {
+        "default": "mdi:robot-vacuum"
+      },
+      "local_statistic": {
+        "default": "mdi:chart-line"
+      },
+      "map_count": {
+        "default": "mdi:floor-plan"
+      },
+      "run_count": {
+        "default": "mdi:counter"
+      },
+      "schedule_event_count": {
+        "default": "mdi:calendar-clock"
+      },
+      "last_run_status": {
+        "default": "mdi:list-status"
+      },
+      "last_run_started_by": {
+        "default": "mdi:gesture-tap-button"
+      },
+      "last_run_battery_used": {
+        "default": "mdi:battery-minus-outline"
+      },
+      "last_run_pickups": {
+        "default": "mdi:hand-back-right-outline"
+      }
+    },
+    "image": {
+      "floor_map": {
+        "default": "mdi:floor-plan"
+      }
+    }
+  }
+}

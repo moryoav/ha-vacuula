@@ -16,14 +16,19 @@ engineering target; the remaining work is tracked in
    interface. This integration does not provision robots or install the server.
 2. Copy `custom_components/vacuula` into Home Assistant's
    `/config/custom_components/vacuula` directory, then restart Home Assistant.
-3. Open **Settings > Devices & services > Add integration**, then choose
-   **Vacuula**. A server advertising `_vacuula._tcp.local.` can also appear as a
-   discovered integration.
-4. Enter the server's HTTP or HTTPS origin, for example
-   `http://vacuula.local:81`, and submit. The hostname must resolve from Home
-   Assistant; use the server's LAN address if it does not.
+3. Open **Settings > Devices & services** and configure the discovered
+   **Vacuula** server, or choose **Add integration > Vacuula**. Manual setup also
+   searches the local network automatically.
+4. Confirm the discovered server. If several servers are found, choose one
+   first. Home Assistant reads the address and actual port from the server's
+   `_vacuula._tcp.local.` announcement. Already configured servers are excluded.
+   If no server is found, enter its HTTP or HTTPS origin, for example
+   `http://vacuula.local:81`. The hostname must resolve from Home Assistant; use
+   the server's LAN address if it does not.
 
-The only setup field is **Server URL**. Include the protocol and app API port;
+The fallback **Server URL** field only appears when discovery finds no server.
+Discovery needs local mDNS traffic to reach Home Assistant; isolated networks
+may require the manual address. Include the protocol and app API port;
 omit `/web`, `/api`, ingress paths, credentials, query parameters, and fragments.
 The direct API does not require authentication. Authenticated reverse proxies
 and redirects are not supported. Keep access to this API on a trusted network.

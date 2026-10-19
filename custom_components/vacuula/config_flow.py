@@ -12,6 +12,7 @@ from yarl import URL
 
 from .client import VacuulaClient, VacuulaError
 from .const import CONF_URL, DEFAULT_URL, DOMAIN
+from .discovery import async_discover_servers
 
 
 def normalize_url(value: str) -> str:
@@ -30,6 +31,22 @@ def normalize_url(value: str) -> str:
     return str(url.origin())
 
 
+def discovery_url(discovery_info: ZeroconfServiceInfo) -> str:
+    """Build an origin from the advertised address, protocol and actual port."""
+    scheme = discovery_info.properties.get("protocol", "http")
+    if not discovery_info.port:
+        raise ValueError("Missing service port")
+    return normalize_url(
+        str(
+            URL.build(
+                scheme=scheme if scheme in {"http", "https"} else "http",
+                host=discovery_info.host,
+                port=discovery_info.port,
+            )
+        )
+    )
+
+
 class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure one server, automatically discovering its robots."""
 
@@ -37,6 +54,7 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._discovered_url: str | None = None
+        self._discovered_servers: dict[str, ZeroconfServiceInfo] = {}
 
     async def _validate(self, base_url: str) -> tuple[dict[str, Any], list[str]]:
         client = VacuulaClient(async_get_clientsession(self.hass), base_url)
@@ -54,6 +72,26 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
+        if user_input is None:
+            self._discovered_servers.clear()
+            found_configured = False
+            for server in await async_discover_servers(self.hass):
+                try:
+                    base_url = discovery_url(server)
+                except ValueError, TypeError:
+                    continue
+                if self._duplicate(base_url, []):
+                    found_configured = True
+                    continue
+                self._discovered_servers[base_url] = server
+            if len(self._discovered_servers) == 1:
+                return await self.async_step_zeroconf(
+                    next(iter(self._discovered_servers.values()))
+                )
+            if self._discovered_servers:
+                return await self.async_step_select_server()
+            if found_configured:
+                return self.async_abort(reason="already_configured")
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
@@ -64,14 +102,7 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except VacuulaError:
                 errors["base"] = "cannot_connect"
             else:
-                if self._duplicate(base_url, robot_ids):
-                    return self.async_abort(reason="already_configured")
-                await self.async_set_unique_id(base_url)
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title="Vacuula",
-                    data={CONF_URL: base_url, "robot_ids": robot_ids},
-                )
+                return await self._async_finish(base_url, robot_ids)
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
@@ -84,21 +115,44 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_select_server(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Let the user choose when several local servers advertise themselves."""
+        if user_input is not None:
+            return await self.async_step_zeroconf(
+                self._discovered_servers[user_input[CONF_URL]]
+            )
+        return self.async_show_form(
+            step_id="select_server",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_URL): vol.In(sorted(self._discovered_servers))}
+            ),
+        )
+
+    async def _async_finish(
+        self, base_url: str, robot_ids: list[str]
+    ) -> config_entries.ConfigFlowResult:
+        """Recheck duplicates immediately before creating the entry."""
+        if self._duplicate(base_url, robot_ids):
+            return self.async_abort(reason="already_configured")
+        await self.async_set_unique_id(
+            base_url, raise_on_progress=self.source != config_entries.SOURCE_USER
+        )
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(
+            title="Vacuula",
+            data={CONF_URL: base_url, "robot_ids": robot_ids},
+        )
+
     async def async_step_zeroconf(
         self, discovery_info: ZeroconfServiceInfo
     ) -> config_entries.ConfigFlowResult:
-        scheme = discovery_info.properties.get("protocol", "http")
         host = discovery_info.host
-        self._discovered_url = str(
-            URL.build(
-                scheme=scheme if scheme in {"http", "https"} else "http",
-                host=host,
-                port=discovery_info.port,
-            )
-        )
         try:
+            self._discovered_url = discovery_url(discovery_info)
             _, robot_ids = await self._validate(self._discovered_url)
-        except VacuulaError:
+        except ValueError, TypeError, VacuulaError:
             return self.async_abort(reason="cannot_connect")
         if self._duplicate(self._discovered_url, robot_ids):
             for entry in self._async_current_entries():
@@ -120,7 +174,10 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }:
                         await self.hass.config_entries.async_reload(entry.entry_id)
             return self.async_abort(reason="already_configured")
-        await self.async_set_unique_id(self._discovered_url)
+        await self.async_set_unique_id(
+            self._discovered_url,
+            raise_on_progress=self.source != config_entries.SOURCE_USER,
+        )
         self._abort_if_unique_id_configured()
         self.context["title_placeholders"] = {CONF_HOST: host}
         return await self.async_step_confirm()
@@ -128,9 +185,22 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
+        assert self._discovered_url is not None
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return await self.async_step_user({CONF_URL: self._discovered_url})
-        return self.async_show_form(step_id="confirm")
+            try:
+                _, robot_ids = await self._validate(self._discovered_url)
+            except VacuulaError:
+                errors["base"] = "cannot_connect"
+            else:
+                return await self._async_finish(self._discovered_url, robot_ids)
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="confirm",
+            data_schema=vol.Schema({}),
+            description_placeholders={"server": self._discovered_url},
+            errors=errors,
+        )
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None

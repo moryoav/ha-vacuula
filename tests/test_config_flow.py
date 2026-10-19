@@ -42,6 +42,15 @@ def test_normalize(value, expected):
 
 
 @pytest.fixture
+def no_discovery():
+    with patch(
+        "custom_components.vacuula.config_flow.async_discover_servers",
+        new=AsyncMock(return_value=[]),
+    ):
+        yield
+
+
+@pytest.fixture
 def client():
     with patch("custom_components.vacuula.config_flow.VacuulaClient") as cls:
         instance = cls.return_value
@@ -50,7 +59,7 @@ def client():
         yield instance
 
 
-async def test_user(hass, client):
+async def test_user(hass, client, no_discovery):
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
@@ -67,7 +76,7 @@ async def test_user(hass, client):
     }
 
 
-async def test_user_errors(hass, client):
+async def test_user_errors(hass, client, no_discovery):
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )

@@ -1,13 +1,13 @@
 # Local validation, 19 October 2026
 
-Integration version: **0.1.0**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.1**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
 
 ## Automated checks
 
-- **274 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling and concurrent preference writes.
-- **99.78% combined line and branch coverage** across all 18 integration modules. The lowest module is **98.80%**. Configuration flow coverage is **100%**.
-- Strict mypy: **passed**, all 18 modules.
-- Ruff lint and formatting: **passed**, all 34 Python source, test and smoke-check files.
+- **305 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference writes and manual setup discovery.
+- **99.79% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.80%**. Configuration flow and discovery helper coverage are **100%**.
+- Strict mypy: **passed**, all 19 modules.
+- Ruff lint and formatting: **passed**, all 37 Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
 
 Run from the source folder on this development machine:
@@ -33,7 +33,7 @@ No cleaning, movement, preference, schedule, map-write, reset, firmware or provi
 
 ## Installation
 
-The component is installed in Home Assistant's `custom_components/vacuula` directory. All 24 installed files were checked against the tested source by SHA-256. Configuration validation passed before and after the copy. Home Assistant was restarted once to load the component; the Vacuula app remained running.
+The component is installed in Home Assistant's `custom_components/vacuula` directory. The initial 0.1.0 installation contained 24 files, checked against the tested source by SHA-256. Configuration validation passed before and after the copy. Home Assistant was restarted to load the component; the Vacuula app remained running.
 
 Vacuula was then discovered through its real Zeroconf announcement and configured through Home Assistant's config-flow API. The entry is **loaded**, with one Neato D5 device running firmware **4.5.3-189**. The live entity registry contains **72 entities: 36 enabled and 36 optional diagnostics**:
 
@@ -50,6 +50,14 @@ Vacuula was then discovered through its real Zeroconf announcement and configure
 No saved maps exist yet, so map images and per-map switches will be added after the server receives maps. Gen4 event switches similarly follow discovered schedule events. No Gen4 device is present on this installation.
 
 Live readback confirmed battery charge, the expected missing-dustbin error, disabled robot sounds and schedule, a 90-minute bin reminder, a 30-day filter reminder and a 180-day brush reminder. Battery charge varied between 99% and 100% during the checks. Home Assistant's native **Refresh data** button succeeded, all **10 advanced actions** were registered, and diagnostics downloaded successfully without the actual robot name or serial. The system log contained **zero Vacuula warnings or errors**, excluding Home Assistant's standard custom-integration notice.
+
+## Manual setup discovery, 0.1.1
+
+Manual setup browses `_vacuula._tcp.local.` for three seconds using Home Assistant's shared mDNS instance. Tests cover dynamically named services, advertised ports, IPv4/IPv6, no server, multiple servers, malformed and disappearing advertisements, cancellation, configured servers and confirmation retries. Resolver tasks and the temporary browser are fully cleaned up.
+
+All 25 files in the 0.1.1 installation matched the tested source by SHA-256. Configuration validation passed and Home Assistant was restarted to load the update. The existing Vacuula entry returned to **loaded**.
+
+A real manually initiated setup found the existing local server in **3.01 seconds** and returned **already_configured**, with **no address form**. The existing entry was retained. Successful confirmation for a new server and multiple-server selection are covered by the config-flow tests. The app was not modified and no movement or robot-setting command was sent.
 
 ## Quality target
 

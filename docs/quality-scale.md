@@ -18,7 +18,7 @@ These statuses are a development checklist, subject to independent review.
 | Area | Evidence |
 | --- | --- |
 | Local asynchronous transport | `client.py` uses asynchronous HTTP and SSE with the Home Assistant-managed `aiohttp` session injected by setup and the config flow. |
-| Setup | `config_flow.py` validates the server and robot list, normalizes URL origins, prevents duplicate URLs or robots, supports Zeroconf and reconfiguration, and updates known server URLs on rediscovery. |
+| Setup | `config_flow.py` searches for advertised servers during manual setup, validates the server and robot list, normalizes URL origins, prevents duplicate URLs or robots, supports Zeroconf and reconfiguration, and updates known server URLs on rediscovery. `discovery.py` uses the shared Home Assistant mDNS instance with bounded browsing and complete task cleanup. |
 | Lifecycle | Typed config-entry runtime data owns the coordinator. Setup performs a first refresh; unload removes the polling timer and cancels and awaits streams. |
 | Updates | Independent 60-second polling, server and per-robot event streams, five-minute optional detail/resource caches, per-robot locks, and bounded reconnect backoff. |
 | Entities | Named controls plus optional scalar diagnostics for state, information, statistics, current and latest runs/subruns. Extra telemetry is read-only and disabled by default. Maps and schedule events dynamically add configuration switches that preserve existing names or commands. |
@@ -32,9 +32,9 @@ The test environment pins **Home Assistant 2026.10.2**, Python 3.14, and
 `pytest-homeassistant-custom-component` in `requirements_test.txt`. Tests cover
 the client, config flow, coordinator, integration lifecycle, actions, images,
 diagnostics, and regression cases. The [local validation](local-validation.md)
-records 274 passing tests, 99.78% combined line and branch coverage, at least
+records 305 passing tests, 99.79% combined line and branch coverage, at least
 98.80% in every module, complete config-flow coverage, and clean strict mypy
-results for all 18 integration modules. Local coverage rules are marked `done`.
+results for all 19 integration modules. Local coverage rules are marked `done`.
 The strict-typing rule remains `todo` for separate client packaging and formal
 Core registration.
 

@@ -74,4 +74,4 @@ rules:
   inject-websession: done
   strict-typing:
     status: todo
-    comment: Strict mypy passes for all 18 local modules; separately published typed-client packaging and formal Core registration remain pending.
+    comment: Strict mypy passes for all 19 local modules; separately published typed-client packaging and formal Core registration remain pending.

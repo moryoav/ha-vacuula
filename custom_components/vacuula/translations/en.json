@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Connect to Vacuula",
-        "description": "Enter the address of the existing Vacuula server. All registered robots will be added automatically. Setup only reads robot data.",
+        "description": "No new Vacuula server was found automatically. Enter the address of the existing server. All registered robots will be added automatically. Setup only reads robot data.",
         "data": {
           "url": "Server URL"
         },
@@ -12,9 +12,19 @@
           "url": "The HTTP or HTTPS address and app port. Use the app's direct address, without /web or an ingress path."
         }
       },
+      "select_server": {
+        "title": "Choose a Vacuula server",
+        "description": "Several local Vacuula servers were found. Choose the server to connect.",
+        "data": {
+          "url": "Server"
+        },
+        "data_description": {
+          "url": "Servers discovered on the local network, including their advertised ports."
+        }
+      },
       "confirm": {
         "title": "Vacuula server discovered",
-        "description": "Connect Home Assistant to this local Vacuula server and add its robots?"
+        "description": "Connect Home Assistant to the local Vacuula server at {server} and add its robots?"
       },
       "reconfigure": {
         "title": "Change Vacuula server address",

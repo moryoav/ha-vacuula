@@ -140,6 +140,7 @@ async def test_schedule(hass, setup):
     robot.generation = GEN4
     with pytest.raises(ServiceValidationError):
         await call(hass, setup, "set_schedule", events=[])
+    coordinator.async_update_schedule_event = AsyncMock(return_value={})
     await call(
         hass,
         setup,
@@ -149,9 +150,7 @@ async def test_schedule(hass, setup):
         time="13:00",
         event_id="old",
     )
-    command = coordinator.async_command.await_args.args[1]
-    assert command["event"]["id"] == "old"
-    assert command["event"]["command"]["ability"] == "cleaning.start"
+    assert coordinator.async_update_schedule_event.await_args.args[1] == "old"
     await call(
         hass, setup, "update_schedule_event", enabled=False, days=["sun"], time="00:00"
     )

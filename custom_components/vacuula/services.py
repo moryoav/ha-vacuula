@@ -1,5 +1,6 @@
 """Validated actions for maps, schedules and advanced Vacuula features."""
 
+from copy import deepcopy
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
@@ -193,6 +194,110 @@ def _gen3_schedule_events(
     return events
 
 
+def _merge_schedule_event(
+    robot: RobotData, event: dict[str, Any], changes: dict[str, Any]
+) -> dict[str, Any]:
+    """Patch one freshly read Gen4 event without replacing omitted settings."""
+    event = deepcopy(event)
+    for key in ("enabled", "days", "time"):
+        if key in changes:
+            event[key] = deepcopy(changes[key])
+    cleaning_fields = {
+        "map_id",
+        "cleaning_type",
+        "zone_ids",
+        "mode",
+        "navigation",
+        "nogo_enabled",
+    }
+    if not cleaning_fields.intersection(changes):
+        return event
+    _cleaning_settings(robot, changes)
+    command = event.get("command")
+    if (
+        not isinstance(command, dict)
+        or command.get("ability") != "cleaning.start"
+        or not isinstance(runs := command.get("runs"), list)
+        or not runs
+        or any(
+            not isinstance(run, dict)
+            or not isinstance(run.get("settings"), dict)
+            or (run.get("map") is not None and not isinstance(run["map"], dict))
+            for run in runs
+        )
+    ):
+        raise _error("action_unavailable")
+
+    map_id = changes.get("map_id")
+    cleaning_type = changes.get("cleaning_type")
+    if cleaning_type == "house" and (map_id or changes.get("zone_ids")):
+        raise _error("invalid_option")
+    if map_id is not None:
+        target: dict[str, Any] | None = {
+            "rank_id": map_id,
+            "track_id": None,
+            "nogo_enabled": True,
+        }
+    elif cleaning_type is not None:
+        target = cleaning_target(robot, cleaning_type, require_dock=False).get("map")
+    else:
+        target = None
+
+    if map_id is not None or cleaning_type is not None:
+        if target is None:
+            # Choosing whole-home cleaning deliberately removes the zone target.
+            runs = [{**runs[0], "map": None}]
+        else:
+            if "zone_ids" not in changes and any(
+                isinstance(previous := run.get("map"), dict)
+                and previous.get("track_id") is not None
+                and previous.get("rank_id") != target["rank_id"]
+                for run in runs
+            ):
+                # Zone identifiers belong to their original floorplan. Never
+                # silently drop them or apply them to a different floorplan.
+                raise _error("schedule_zones_required")
+            for run in runs:
+                previous = run.get("map")
+                run["map"] = {
+                    **target,
+                    **(previous if isinstance(previous, dict) else {}),
+                    "rank_id": target["rank_id"],
+                }
+
+    if "zone_ids" in changes:
+        maps = [run.get("map") for run in runs]
+        if all(item is None for item in maps) and not changes["zone_ids"]:
+            runs = [{**runs[0], "map": None}]
+        elif (
+            any(not isinstance(item, dict) for item in maps)
+            or len({item.get("rank_id") for item in maps}) != 1
+            or not isinstance(maps[0].get("rank_id"), str)
+        ):
+            raise _error("map_required")
+        else:
+            selected = []
+            for zone in changes["zone_ids"] or [None]:
+                source = next(
+                    (run for run in runs if run["map"].get("track_id") == zone),
+                    runs[0],
+                )
+                selected.append(
+                    {**deepcopy(source), "map": {**source["map"], "track_id": zone}}
+                )
+            runs = selected
+
+    for run in runs:
+        if "mode" in changes:
+            run["settings"]["mode"] = changes["mode"]
+        if "navigation" in changes:
+            run["settings"]["navigation_mode"] = changes["navigation"]
+        if "nogo_enabled" in changes and isinstance(run.get("map"), dict):
+            run["map"]["nogo_enabled"] = changes["nogo_enabled"]
+    command["runs"] = runs
+    return event
+
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
     """Register globally so action validation also works while entries are offline."""
@@ -217,22 +322,18 @@ def async_setup_services(hass: HomeAssistant) -> None:
         },
         "update_schedule_event": {
             vol.Optional("event_id"): _IDENTIFIER,
-            vol.Required("enabled"): bool,
-            vol.Required("days"): vol.All(
+            vol.Optional("enabled"): bool,
+            vol.Optional("days"): vol.All(
                 [vol.In(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])],
                 vol.Length(min=1, max=7),
             ),
-            vol.Required("time"): _TIME,
+            vol.Optional("time"): _TIME,
             vol.Optional("map_id"): _IDENTIFIER,
-            vol.Optional("cleaning_type", default="auto"): vol.In(
-                ["auto", "map", "house"]
-            ),
-            vol.Optional("zone_ids", default=[]): vol.All(
-                [_IDENTIFIER], vol.Length(max=20)
-            ),
-            vol.Optional("mode", default="eco"): _MODE,
-            vol.Optional("navigation", default="normal"): vol.In(["normal", "gentle"]),
-            vol.Optional("nogo_enabled", default=True): bool,
+            vol.Optional("cleaning_type"): vol.In(["auto", "map", "house"]),
+            vol.Optional("zone_ids"): vol.All([_IDENTIFIER], vol.Length(max=20)),
+            vol.Optional("mode"): _MODE,
+            vol.Optional("navigation"): vol.In(["normal", "gentle"]),
+            vol.Optional("nogo_enabled"): bool,
         },
         "delete_schedule_event": {vol.Required("event_id"): _IDENTIFIER},
         "set_boundaries": {
@@ -284,9 +385,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 await coordinator.client.async_map(serial, data["map_id"])
             if action == "clean":
                 if data["cleaning_type"] != "house":
-                    coordinator.validate_map_recovery(serial)
-                if "map_id" not in data and data["cleaning_type"] != "house":
                     await coordinator.async_refresh_maps(serial)
+                    coordinator.validate_map_recovery(serial)
                 result = await coordinator.async_command(
                     serial,
                     _clean_command(robot, data, use_default_map=True),
@@ -303,10 +403,40 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 )
             elif action == "update_schedule_event":
                 _require_generation(robot, GEN4)
-                if data["cleaning_type"] != "house":
-                    coordinator.validate_map_recovery(serial)
-                if "map_id" not in data and data["cleaning_type"] != "house":
+                if "event_id" in data:
+                    if ("map_id" in data or "cleaning_type" in data) and data.get(
+                        "cleaning_type"
+                    ) != "house":
+                        await coordinator.async_refresh_maps(serial)
+
+                    def update_event(event: dict[str, Any]) -> dict[str, Any]:
+                        if (
+                            data.get("cleaning_type") in {"auto", "map"}
+                            or "map_id" in data
+                        ):
+                            coordinator.validate_map_recovery(serial)
+                        event = _merge_schedule_event(robot, event, data)
+                        command = event.get("command", {})
+                        runs = (
+                            command.get("runs") if isinstance(command, dict) else None
+                        )
+                        if isinstance(runs, list) and any(
+                            isinstance(run, dict) and isinstance(run.get("map"), dict)
+                            for run in runs
+                        ):
+                            coordinator.validate_map_recovery(serial)
+                        return event
+
+                    result = await coordinator.async_update_schedule_event(
+                        serial, data["event_id"], update_event
+                    )
+                    return {"response": result}
+                if not {"enabled", "days", "time"}.issubset(data):
+                    raise _error("invalid_schedule_event")
+                cleaning_type = data.get("cleaning_type", "auto")
+                if cleaning_type != "house":
                     await coordinator.async_refresh_maps(serial)
+                    coordinator.validate_map_recovery(serial)
                 command = _clean_command(
                     robot, data, use_default_map=True, require_dock=False
                 )
@@ -320,12 +450,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                         "force_floorplan": False,
                     },
                 }
-                if "event_id" in data:
-                    event["id"] = data["event_id"]
                 result = await coordinator.async_command(
                     serial,
                     {"ability": "scheduling.update", "event": event},
-                    require_map_recovery=data["cleaning_type"] != "house",
+                    require_map_recovery=cleaning_type != "house",
                 )
             elif action == "delete_schedule_event":
                 _require_generation(robot, GEN4)

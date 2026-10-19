@@ -144,6 +144,14 @@ no-go protection. Current docking does not affect this future cleaning command.
 No promoted map means whole-home cleaning, unless explicit mapped cleaning was
 requested. Explicit `cleaning_type: house` stores mapless cleaning. The map ID
 is selected when writing the event; the robot does not reselect it at run time.
+With `event_id`, the integration reads `scheduling.show`, locates exactly one
+event, merges only supplied fields, then writes `scheduling.update` under the
+same robot lock. Unknown event/command/run fields and omitted settings survive.
+Mode, navigation and no-go edits apply across runs. Explicit zone lists replace
+zones; an empty list means the whole floorplan. Event-enabled switches use the
+same fresh read/merge/write path so a stale cache cannot revert an app edit.
+Changing floorplans with existing zones requires an explicit zone list so IDs
+from the previous floorplan are neither carried over nor silently removed.
 
 Gen4 HTTP boundary replacement stores data on the server. For an already
 promoted map, the integration saves then re-promotes it under one robot lock so
@@ -151,15 +159,23 @@ the robot receives updated zones. Fresh map metadata determines active status;
 inactive maps stay inactive. Save failure prevents promotion, and promotion
 failure is reported even though the server may already have stored boundaries.
 The server demotes the active floorplan before upload; failure can therefore
-remove active no-go protection. Before promotion, the integration persists a
-pending marker in entry options. It reads map status back after success/failure
-and raises a persistent repair notice until a successful `map_action: promote`
-and a fresh promoted-map readback confirm recovery. It does not retry commands
-or attempt an unconfirmed rollback. Pending recovery blocks new Automatic/map
-starts and new/updated Automatic or mapped Gen4 schedule commands, including
-after reload/restart. Explicit house cleaning and schedules remain available;
-existing robot schedules, event-enabled switches and outside controls are
-unaffected. Unreadable status invalidates the stale promoted-map cache.
+remove active no-go protection. Offline promotion is refused before creating
+a pending marker; active boundary edits are refused before saving boundaries.
+Before an upload, a pending marker records uncertainty across reload/restart.
+Fresh map reads reconcile it with authoritative server status: promoted,
+inactive, removed maps and removed robots clear it. Any failed upload still
+reports an action error. The same demotion routine is used by failed promotion
+and explicit web-app demotion, with no distinguishing field in the read API.
+Known inactive maps therefore follow ordinary Automatic mapless fallback;
+they do not retain an integration-only block.
+
+Only failed reads or unknown map status keep the repair notice and recovery
+guard. Notices identify the robot and map ID. Periodic reads, Refresh data and
+subsequent actions recognize app-side repairs without an HA promotion command.
+Reads use the robot lock so an in-progress upload cannot be reconciled against
+stale pre-upload status. No commands are retried or rolled back automatically.
+Explicit house cleaning/schedules, existing robot schedules and outside controls
+remain available. Unreadable status invalidates the stale promoted-map cache.
 
 Generation 3 map-enabled switches use the app's map update endpoint, preserving
 the cached map name. Generation 4 event-enabled switches send `scheduling.update`

@@ -1,11 +1,11 @@
 # Local validation, 19 October 2026
 
-Integration version: **0.1.3**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.4**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
 
 ## Automated checks
 
-- **555 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference writes, manual setup discovery and the protocol/state regressions below.
-- **99.65% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.96%**. Configuration flow coverage is **99.29%** and the discovery helper has **100%**.
+- **627 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery and the protocol/state regressions below.
+- **99.61% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.96%**. Configuration flow coverage is **99.29%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 19 modules.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
@@ -94,6 +94,19 @@ All 25 installed 0.1.2 files matched the tested source by SHA-256. Home Assistan
 All robot writes were tested with mocked transports. No movement, schedule, boundary, preference or reset command was sent to the physical robot.
 
 All 25 installed 0.1.3 files matched the tested source by SHA-256. Configuration validation passed before and after copying. After one Home Assistant restart, the existing entry was **loaded**, diagnostics confirmed runtime **0.1.3**, and the D5 remained connected and docked. A real Add integration flow found the already configured server and displayed the **Server URL** form for another server. That temporary flow was removed without creating an entry. The Vacuula app was not modified.
+
+## Recovery lifecycle and schedule patches, 0.1.4
+
+- Offline promotion and active-floorplan boundary edits are rejected before any save or recovery marker. Inactive map boundaries remain server-side metadata and can be edited offline.
+- A successful authoritative map read resolves pending status when the map is promoted, inactive or removed. The server exposes the same inactive state after a failed promotion and deliberate demotion, so known inactive maps use normal Automatic whole-home fallback without no-go protection. Unknown status or failed readback retains the guard.
+- Tests cover harmless promotion failures with an unchanged active map, actual failed uploads with inactive maps, app-side promotion/demotion, deleted maps, removed robots, reloaded pending options and multi-robot notice isolation. Notices include the robot name and map ID.
+- Pending status bypasses the five-minute resource cache. Map polling shares the robot lock so a read started during upload cannot clear uncertainty using stale pre-upload state.
+- Existing Gen4 schedule updates read the current event, merge only explicit fields and write under one lock. Tests preserve multiple zones, different per-run settings and unknown options through metadata, mode, navigation and no-go edits. Explicit zone lists replace zones; cross-floorplan changes require explicit zone IDs.
+- Concurrent edits preserve both changes. Missing, duplicated or malformed events and failed reads prevent stale writes. Event-enabled switches use the same fresh merge path and preserve newer app edits.
+
+All robot writes were tested with mocked transports. No movement, schedule, boundary, preference or reset command was sent to the physical robot. The Vacuula app was not modified.
+
+All 25 installed 0.1.4 files matched the tested source by SHA-256. Home Assistant configuration validation passed before and after copying. After one restart, the existing entry was **loaded**, a real diagnostics download confirmed runtime **0.1.4**, and the D5 remained connected and docked. The previous installation was backed up outside the source repository.
 
 ## Quality target
 

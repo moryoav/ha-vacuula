@@ -1,6 +1,7 @@
 """Verify saved Gen4 boundary changes reach the active robot map safely."""
 
 import asyncio
+from time import monotonic
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -13,6 +14,7 @@ from custom_components.vacuula.client import CannotConnect, VacuulaError
 from custom_components.vacuula.const import DOMAIN, GEN4
 from custom_components.vacuula.coordinator import VacuulaCoordinator
 from custom_components.vacuula.data import RobotData
+from custom_components.vacuula.vacuum import start_payload
 
 BOUNDARIES = [
     {
@@ -95,10 +97,9 @@ async def test_failed_promotion_cannot_be_reported_as_success(boundary_coordinat
     assert caught.value.translation_key == "map_promotion_failed"
     assert caught.value.__cause__ is failure
     assert coordinator.robots["robot"].maps == [{"id": "map1", "promoted": False}]
-    assert coordinator.entry.options["pending_map_promotions"] == {"robot": "map1"}
-    with pytest.raises(ServiceValidationError) as blocked:
-        coordinator.validate_map_recovery("robot")
-    assert blocked.value.translation_key == "map_promotion_required"
+    assert not coordinator.entry.options["pending_map_promotions"]
+    coordinator.validate_map_recovery("robot")
+    assert start_payload(coordinator, "robot")["runs"][0]["map"] is None
     assert coordinator.client.async_map_action.await_args_list == [
         call("robot", "map1", "boundaries", BOUNDARIES),
         call("robot", "map1", "promote"),
@@ -207,7 +208,7 @@ async def test_pending_upload_survives_reload_and_clears_after_confirmed_recover
     assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None
 
 
-@pytest.mark.parametrize("readback", [CannotConnect("Read failed"), []])
+@pytest.mark.parametrize("readback", [CannotConnect("Read failed"), [{"id": "map1"}]])
 async def test_unverified_promotion_keeps_repair_and_guard(
     boundary_coordinator, readback
 ):
@@ -219,7 +220,7 @@ async def test_unverified_promotion_keeps_repair_and_guard(
     with pytest.raises(HomeAssistantError) as caught:
         await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
     assert caught.value.translation_key == "map_promotion_failed"
-    assert coordinator.robots["robot"].maps == []
+    assert coordinator.robots["robot"].maps in ([], [{"id": "map1"}])
     with pytest.raises(ServiceValidationError):
         coordinator.validate_map_recovery("robot")
 
@@ -262,8 +263,8 @@ async def test_failed_standalone_promotion_exposes_demoted_state(boundary_coordi
         await coordinator.async_map_operation("robot", "map1", "promote")
     assert caught.value.translation_key == "map_promotion_failed"
     assert coordinator.robots["robot"].maps == [{"id": "map1", "promoted": False}]
-    with pytest.raises(ServiceValidationError):
-        coordinator.validate_map_recovery("robot")
+    coordinator.validate_map_recovery("robot")
+    assert not coordinator.entry.options["pending_map_promotions"]
     coordinator.client.async_map_action.assert_awaited_once()
 
 
@@ -274,3 +275,235 @@ async def test_removing_server_cleans_up_its_persistent_repair(boundary_coordina
     assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id)
     await async_remove_entry(coordinator.hass, coordinator.entry)
     assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+@pytest.mark.parametrize("operation", ["promote", "boundaries"])
+async def test_offline_promotion_never_saves_or_creates_recovery(
+    boundary_coordinator, operation
+):
+    coordinator = boundary_coordinator
+    coordinator.robots["robot"].connected = False
+    with pytest.raises(HomeAssistantError) as error:
+        if operation == "promote":
+            await coordinator.async_map_operation("robot", "map1", "promote")
+        else:
+            await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
+    assert error.value.translation_key == "offline"
+    coordinator.client.async_map_action.assert_not_awaited()
+    assert not coordinator.has_pending_map_recovery("robot")
+    assert "pending_map_promotions" not in coordinator.entry.options
+    issue_id = f"{coordinator.entry.entry_id}_robot_map_promotion"
+    assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_inactive_boundaries_can_still_be_saved_offline(boundary_coordinator):
+    coordinator = boundary_coordinator
+    coordinator.robots["robot"].connected = False
+    coordinator.client.async_maps.return_value = [{"id": "map1", "promoted": False}]
+    await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
+    coordinator.client.async_map_action.assert_awaited_once_with(
+        "robot", "map1", "boundaries", BOUNDARIES
+    )
+    assert not coordinator.has_pending_map_recovery("robot")
+
+
+@pytest.mark.parametrize("operation", ["promote", "boundaries"])
+async def test_rejected_promotion_preserving_active_map_clears_recovery(
+    boundary_coordinator, operation
+):
+    """A disconnect after preflight can be rejected before any server demotion."""
+    coordinator = boundary_coordinator
+    failure = VacuulaError("Robot not connected")
+    coordinator.client.async_map_action.side_effect = (
+        failure if operation == "promote" else [{"saved": True}, failure]
+    )
+    with pytest.raises(HomeAssistantError) as error:
+        if operation == "promote":
+            await coordinator.async_map_operation("robot", "map1", "promote")
+        else:
+            await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
+    assert error.value.translation_key == "map_promotion_failed"
+    assert not coordinator.has_pending_map_recovery("robot")
+    coordinator.validate_map_recovery("robot")
+    assert coordinator.robots["robot"].maps == [{"id": "map1", "promoted": True}]
+    issue_id = f"{coordinator.entry.entry_id}_robot_map_promotion"
+    assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+@pytest.mark.parametrize(
+    "maps",
+    [
+        [{"id": "map1", "promoted": True}],
+        [{"id": "map1", "promoted": False}],
+        [{"id": "map1"}, {"id": "another", "promoted": True}],
+        [],
+    ],
+)
+@pytest.mark.parametrize("refresh", ["explicit", "poll"])
+async def test_authoritative_maps_resolve_external_recovery_or_demotion(
+    boundary_coordinator, maps, refresh
+):
+    coordinator = boundary_coordinator
+    coordinator._set_pending_promotion("robot", "map1")
+    coordinator.client.async_maps.return_value = maps
+    coordinator.client.async_runs = AsyncMock(return_value=[])
+    if refresh == "explicit":
+        await coordinator.async_refresh_maps("robot")
+    else:
+        await coordinator._async_refresh_resources("robot", full=True)
+    assert coordinator.robots["robot"].maps == maps
+    assert not coordinator.has_pending_map_recovery("robot")
+    assert not coordinator.entry.options["pending_map_promotions"]
+    issue_id = f"{coordinator.entry.entry_id}_robot_map_promotion"
+    assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None
+    coordinator.client.async_map_action.assert_not_awaited()
+
+
+async def test_pending_upload_bypasses_recent_resource_cache(boundary_coordinator):
+    coordinator = boundary_coordinator
+    coordinator._set_pending_promotion("robot", "map1")
+    coordinator._last_resources["robot"] = monotonic()
+    coordinator.client.async_runs = AsyncMock(return_value=[])
+    coordinator.client.async_maps.return_value = [{"id": "map1", "promoted": False}]
+    await coordinator._async_refresh_resources("robot")
+    coordinator.client.async_maps.assert_awaited_once_with("robot")
+    assert not coordinator.has_pending_map_recovery("robot")
+
+
+async def test_poll_cannot_reconcile_previous_map_during_promotion(
+    boundary_coordinator,
+):
+    coordinator = boundary_coordinator
+    upload_started = asyncio.Event()
+    finish_upload = asyncio.Event()
+
+    async def promote(*args):
+        upload_started.set()
+        await finish_upload.wait()
+        return {"promoted": True}
+
+    coordinator.client.async_map_action.side_effect = promote
+    coordinator.client.async_runs = AsyncMock(return_value=[])
+    upload = asyncio.create_task(
+        coordinator.async_map_operation("robot", "map1", "promote")
+    )
+    poll = None
+    try:
+        async with asyncio.timeout(5):
+            await upload_started.wait()
+            poll = asyncio.create_task(
+                coordinator._async_refresh_resources("robot", full=True)
+            )
+            await asyncio.sleep(0)
+            coordinator.client.async_maps.assert_not_awaited()
+            assert coordinator.has_pending_map_recovery("robot")
+            finish_upload.set()
+            await asyncio.gather(upload, poll)
+        assert coordinator.client.async_maps.await_count == 2
+        assert not coordinator.has_pending_map_recovery("robot")
+    finally:
+        finish_upload.set()
+        tasks = [upload] if poll is None else [upload, poll]
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize("action", ["demote", "delete"])
+async def test_successful_explicit_demotion_clears_uncertain_upload(
+    boundary_coordinator, action
+):
+    coordinator = boundary_coordinator
+    coordinator._set_pending_promotion("robot", "map1")
+    await coordinator.async_map_operation("robot", "map1", action)
+    assert not coordinator.has_pending_map_recovery("robot")
+
+
+async def test_failed_demotion_keeps_uncertain_upload(boundary_coordinator):
+    coordinator = boundary_coordinator
+    coordinator._set_pending_promotion("robot", "map1")
+    coordinator.client.async_map_action.side_effect = CannotConnect("Disconnected")
+    with pytest.raises(CannotConnect):
+        await coordinator.async_map_operation("robot", "map1", "demote")
+    assert coordinator.has_pending_map_recovery("robot")
+
+
+@pytest.mark.parametrize(
+    "map_state", [{"id": "map1"}, {"id": "map1", "promoted": None}]
+)
+async def test_unreadable_or_unknown_map_status_retains_recovery(
+    boundary_coordinator, map_state
+):
+    coordinator = boundary_coordinator
+    coordinator._set_pending_promotion("robot", "map1")
+    coordinator.client.async_maps.return_value = [map_state]
+    await coordinator.async_refresh_maps("robot")
+    assert coordinator.has_pending_map_recovery("robot")
+    coordinator.client.async_maps.side_effect = CannotConnect("Read failed")
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_refresh_maps("robot")
+    assert coordinator.has_pending_map_recovery("robot")
+    assert coordinator.robots["robot"].maps == []
+    assert coordinator.robots["robot"].capabilities["maps_available"] is False
+
+
+async def test_removed_robot_cleans_only_its_persistent_repair(boundary_coordinator):
+    coordinator = boundary_coordinator
+    coordinator.robots["other"] = RobotData("other", "Upstairs", GEN4, True)
+    coordinator._set_pending_promotion("robot", "map1")
+    coordinator._set_pending_promotion("other", "map2")
+    await coordinator._async_snapshot({"other": {"type": GEN4, "connected": True}})
+    assert coordinator.entry.options["pending_map_promotions"] == {"other": "map2"}
+    registry = ir.async_get(coordinator.hass)
+    assert (
+        registry.async_get_issue(
+            DOMAIN, f"{coordinator.entry.entry_id}_robot_map_promotion"
+        )
+        is None
+    )
+    assert registry.async_get_issue(
+        DOMAIN, f"{coordinator.entry.entry_id}_other_map_promotion"
+    )
+
+
+async def test_removed_robot_loaded_from_options_also_cleans_repair(
+    boundary_coordinator,
+):
+    coordinator = boundary_coordinator
+    coordinator._set_pending_promotion("robot", "map1")
+    replacement = VacuulaCoordinator(
+        coordinator.hass, coordinator.entry, coordinator.client
+    )
+    assert not replacement.robots
+    await replacement._async_snapshot({})
+    assert not coordinator.entry.options["pending_map_promotions"]
+    issue_id = f"{coordinator.entry.entry_id}_robot_map_promotion"
+    assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_repair_identifies_each_robot_and_floorplan_after_reload(
+    boundary_coordinator,
+):
+    coordinator = boundary_coordinator
+    coordinator.robots["other"] = RobotData("other", "Upstairs", GEN4, True)
+    coordinator._set_pending_promotion("robot", "map1")
+    coordinator._set_pending_promotion("other", "map2")
+    replacement = VacuulaCoordinator(
+        coordinator.hass, coordinator.entry, coordinator.client
+    )
+    await replacement._async_snapshot(
+        {
+            "robot": {"name": "Downstairs", "type": GEN4, "connected": False},
+            "other": {"name": "Upstairs", "type": GEN4, "connected": False},
+        }
+    )
+    registry = ir.async_get(coordinator.hass)
+    for serial, name, map_id in (
+        ("robot", "Downstairs", "map1"),
+        ("other", "Upstairs", "map2"),
+    ):
+        issue = registry.async_get_issue(
+            DOMAIN, f"{coordinator.entry.entry_id}_{serial}_map_promotion"
+        )
+        assert issue.translation_placeholders == {"robot": name, "map_id": map_id}

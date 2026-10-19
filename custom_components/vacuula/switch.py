@@ -242,9 +242,10 @@ class VacuulaScheduleEventSwitch(VacuulaEntity, SwitchEntity):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="action_unavailable"
             )
-        await self.coordinator.async_command(
+        await self.coordinator.async_update_schedule_event(
             self.serial,
-            {"ability": "scheduling.update", "event": {**event, "enabled": enabled}},
+            self.event_id,
+            lambda current: {**current, "enabled": enabled},
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:

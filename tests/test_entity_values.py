@@ -1,5 +1,6 @@
 """Telemetry conversion, optional capabilities and exact control payloads."""
 
+from copy import deepcopy
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 
@@ -512,13 +513,24 @@ async def test_schedule_event_preserves_command_and_unknowns(coordinator):
     entity = entities[0]
     assert isinstance(entity, VacuulaScheduleEventSwitch)
     assert entity.translation_placeholders == {"event_name": "08:00"}
+    stored_event = deepcopy(event)
+
+    async def command(serial, payload):
+        nonlocal stored_event
+        if payload["ability"] == "scheduling.show":
+            return {"code": 200, "body": {"events": [deepcopy(stored_event)]}}
+        if payload["ability"] == "scheduling.update":
+            stored_event = deepcopy(payload["event"])
+        return {"code": 200, "body": {}}
+
+    coordinator.client.async_command = AsyncMock(side_effect=command)
     await entity.async_turn_on()
-    coordinator.async_command.assert_awaited_with(
+    coordinator.client.async_command.assert_any_await(
         "robot", {"ability": "scheduling.update", "event": {**event, "enabled": True}}
     )
     assert event["enabled"] is False
     await entity.async_turn_off()
-    coordinator.async_command.assert_awaited_with(
+    coordinator.client.async_command.assert_any_await(
         "robot", {"ability": "scheduling.update", "event": event}
     )
     robot.schedule = {"events": None}

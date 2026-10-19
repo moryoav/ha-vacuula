@@ -485,6 +485,9 @@ async def test_dynamic_map_and_schedule_event_switches(hass, loaded):
         "robot3", "ground", "Ground floor", True
     )
     assert hass.states.get(map_entity).state == "on"
+    # A newer app edit must survive a switch toggle even if HA's event is stale.
+    event["command"]["runs"][0]["settings"]["mode"] = "turbo"
+    events[:] = [deepcopy(event)]
     await hass.services.async_call(
         "switch", "turn_on", {"entity_id": event_entity}, blocking=True
     )

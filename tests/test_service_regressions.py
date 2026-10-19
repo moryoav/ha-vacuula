@@ -315,7 +315,7 @@ async def test_gen4_schedule_explicit_zone_keeps_target_and_settings(
         run["settings"] == {"mode": "turbo", "navigation_mode": "gentle"}
         for run in runs
     )
-    coordinator.async_refresh_maps.assert_not_awaited()
+    coordinator.async_refresh_maps.assert_awaited_once_with(robot.serial)
 
 
 @pytest.mark.parametrize(
@@ -373,7 +373,7 @@ async def test_clean_and_schedule_require_known_floorplan_recovery(
     with pytest.raises(ServiceValidationError) as error:
         await _call(hass, action_setup, action, **payload)
     assert error.value.translation_key == "map_promotion_required"
-    coordinator.async_refresh_maps.assert_not_awaited()
+    coordinator.async_refresh_maps.assert_awaited_once_with(robot.serial)
     coordinator.async_command.assert_not_awaited()
 
 

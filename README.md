@@ -193,7 +193,7 @@ context. Standard vacuum entity controls use the usual entity permissions.
 | --- | --- | --- |
 | `vacuula.clean` | Optional `map_id`, `cleaning_type`, `zone_ids`, `mode`, `navigation`, `nogo_enabled` | Both. Starts cleaning, automatically using saved maps by default; zones require a map. Generation 3 accepts at most one zone. |
 | `vacuula.set_schedule` | Required `events`; optional `time_basis` | Generation 3. Replaces every schedule event; `[]` clears them. Times default to Home Assistant local time. Does not enable the schedule. |
-| `vacuula.update_schedule_event` | Required `enabled`, `days`, `time`; optional `event_id` and cleaning fields | Generation 4. Adds an event or updates an existing ID. |
+| `vacuula.update_schedule_event` | New event: required `enabled`, `days`, `time`. Existing event: `event_id` plus fields to change. | Generation 4. Adds an event or merges changes into a freshly read existing event. Omitted settings and zones are preserved. |
 | `vacuula.delete_schedule_event` | Required `event_id` | Generation 4. Deletes one event. |
 | `vacuula.set_boundaries` | Required `map_id`, `boundaries` | Both. Replaces the complete boundary list; `[]` removes all boundaries. Generation 4 re-promotes an active map after saving so the robot receives the new zones. Inactive maps stay inactive. Read and preserve existing boundaries first. |
 | `vacuula.rename_robot` | Required `name` | Both. Changes the name stored by Vacuula. |
@@ -225,7 +225,7 @@ zone IDs reject the complete write before changing the schedule. The exact
 zone response on real Gen3 hardware remains unverified.
 
 Generation 4 events use `days` from `mon` through `sun` and `time: HH:MM` in the
-robot's configured timezone. Their default `cleaning_type: auto` uses the
+robot's configured timezone. For new events, the default `cleaning_type: auto` uses the
 current promoted floorplan with no-go protection, even if the robot is off
 dock while the event is being created. Without a promoted floorplan it uses
 whole-home cleaning. `cleaning_type: map` requires a promoted floorplan;
@@ -233,15 +233,33 @@ whole-home cleaning. `cleaning_type: map` requires a promoted floorplan;
 is stored in the event; it is not reselected when the schedule runs. Up to 100
 Generation 3 schedule events are accepted.
 
+With `event_id`, only supplied fields change. Omitted time, enabled state,
+days, modes, navigation, zones, no-go settings and other stored options keep
+their current server values. The integration reads and updates the event
+under one robot lock; a missing or ambiguous event ID is rejected. Supplying
+`mode`, `navigation` or `nogo_enabled` changes that setting across its runs.
+An explicit `zone_ids` list replaces the zones; `zone_ids: []` selects the
+whole floorplan. Selecting `cleaning_type: house` removes the mapped target.
+When changing floorplans, an event with existing zones requires an explicit
+`zone_ids` list for the new map, or `[]` for its whole floorplan.
+
 An active Gen4 boundary update re-promotes the map. Vacuula demotes the previous
 floorplan first, so a rejected or timed-out promotion can leave the robot
-without an active floorplan or no-go protection. The integration reads back
-status, raises a persistent Repairs notice, and blocks new Automatic/mapped
-starts and new/updated Automatic or mapped schedule commands until recovery. This survives Home Assistant
-restarts. Check the saved boundaries and run `vacuula.map_action` with
-`action: promote` and the map ID; a confirmed promotion and readback clear
-the notice. Explicit mapless cleaning remains available. Existing robot
-schedules, schedule-event switches and controls outside this integration are not blocked.
+without an active floorplan or no-go protection. Promotion and active-map
+boundary edits are refused while the robot is offline, before saving changes.
+After an upload, the integration reads current map status. A failed action
+still reports an error, but a confirmed promoted or inactive map clears the
+recovery marker. Inactive maps allow the usual Automatic whole-home fallback
+without no-go protection. The server cannot distinguish a failed promotion
+from a deliberate demotion in its map status.
+
+Only unknown status retains a Repairs notice and blocks Automatic/mapped
+starts and schedule commands. The notice identifies the robot and map ID.
+A fresh map read detects promotion or demotion made in the Vacuula app;
+removing the map or robot also clears the notice. Use **Refresh data** or retry
+the action to request current status. Explicit mapless cleaning remains
+available. Existing robot schedules and controls outside this integration
+are not blocked. Robot commands are never retried automatically.
 
 A boundary contains `id`, `name`, `color` (`#RRGGBB`), `type` (`polygon` or
 `polyline`), `vertices`, and `enabled`. Vertices are normalized `[x, y]` pairs
@@ -323,10 +341,10 @@ After a successful command, the integration reads state back from the robot.
   Run maps, live robot paths, and boundary editing are not image features.
 - **Server address changed:** use **Reconfigure** with the new origin. Zeroconf
   rediscovery can also update the URL when a known robot identifies the server.
-- **Floorplan upload needs recovery:** check **Settings > System > Repairs**.
-  Verify the saved map and boundaries, then promote it using `vacuula.map_action`.
-  A failed upload may have removed active no-go protection; commands are not
-  retried automatically.
+- **Unknown floorplan status:** check **Settings > System > Repairs** for the
+  robot and map ID. Verify the saved map in Vacuula, then use **Refresh data**.
+  Promotion or demotion in the app is recognized on a fresh map read. Inactive
+  maps allow whole-home Automatic cleaning without no-go protection.
 
 Download integration diagnostics from **Settings > Devices & services** when
 investigating a fault. Diagnostics use cached data only and omit the server URL,

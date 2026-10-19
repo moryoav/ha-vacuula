@@ -24,7 +24,7 @@ These statuses are a development checklist, subject to independent review.
 | Entities | Named controls plus optional scalar diagnostics for state, information, statistics, current and latest runs/subruns. Extra telemetry is read-only and disabled by default. Maps and schedule events dynamically add configuration switches that preserve existing names or commands. |
 | Actions | Ten globally registered administrator actions, explicit schemas and generation checks, translated errors, safe mapped-cleaning defaults, atomic pause/dock and Gen4 boundary upload sequences, local-to-UTC Gen3 schedules, no raw command passthrough, and no automatic command retries. |
 | Diagnostics | Cached allowlisted telemetry including reviewed details/meta fields; server URL, robot identities, maps, and complete schedule contents are excluded. No diagnostic network requests. |
-| Repairs | A persisted pending-floorplan marker and translated repair notice identify unconfirmed Gen4 promotions. Automatic/mapped actions validate recovery under the robot lock. An acknowledged promotion and fresh map readback clear the notice; removing the config entry removes its notice. |
+| Repairs | A persisted marker identifies unknown Gen4 floorplan status. Offline promotions are refused before writes. Fresh map reads recognize app-side changes, promoted/inactive maps and removals; only unresolved status retains the guard and a notice naming the robot and map ID. |
 | Documentation | README includes installation/removal, setup fields, entities, all actions, examples, data updates, supported generations, limitations, and troubleshooting. Protocol notes identify the reviewed API and validation limits. |
 
 ## Verification boundary
@@ -33,7 +33,7 @@ The test environment pins **Home Assistant 2026.10.2**, Python 3.14, and
 `pytest-homeassistant-custom-component` in `requirements_test.txt`. Tests cover
 the client, config flow, coordinator, integration lifecycle, actions, images,
 diagnostics, and regression cases. The [local validation](local-validation.md)
-records 555 passing tests, 99.65% combined line and branch coverage, at least
+records 627 passing tests, 99.61% combined line and branch coverage, at least
 98.96% in every module, 99.29% config-flow coverage, and clean strict mypy
 results for all 19 integration modules. Local coverage rules are marked `done`.
 The strict-typing rule remains `todo` for separate client packaging and formal

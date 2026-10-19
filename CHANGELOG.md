@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4
+
+- Refused offline floorplan promotion and active-map boundary edits before saving changes or creating recovery notices.
+- Reconciled recovery notices and blocks with fresh map status, including changes made in the Vacuula app, inactive maps and removed maps or robots.
+- Identified the affected robot and map ID in floorplan repair notices; retained recovery guards only while map status is unknown.
+- Merged existing Generation 4 schedule-event changes with fresh server data, preserving omitted settings, zones and per-run options.
+- Serialized schedule reads, edits and event-switch updates so stale cached data cannot overwrite newer app changes.
+
 ## 0.1.3
 
 - Matched Automatic cleaning to the app's whole-home fallback when maps are inactive or the robot is off dock, while retaining explicit mapped cleaning.

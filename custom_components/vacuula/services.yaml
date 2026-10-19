@@ -67,35 +67,35 @@ set_schedule:
           options: [local, utc]
 update_schedule_event:
   name: Add or update schedule event
-  description: Add or update a Generation 4 schedule event. Automatically uses the promoted floorplan and respects no-go boundaries when available, regardless of the robot's current dock state. Times use the robot's configured timezone.
+  description: Add or update a Generation 4 schedule event. With an existing event ID, only supplied fields change and all other settings and zones are preserved. New events require enabled, days and time and default to eco, normal navigation and the promoted floorplan with no-go protection when available. Times use the robot's configured timezone.
   fields:
     device_id: *device
     event_id:
       name: Existing event ID
+      description: Omit to create an event. Supply an existing ID to update selected fields from the robot's current event.
       selector:
         text:
     enabled:
       name: Enabled
-      required: true
+      description: Required for a new event. Omit to preserve an existing value.
       selector:
         boolean:
     days:
       name: Days
-      required: true
+      description: Required for a new event. Omit to preserve an existing value.
       selector:
         select:
           multiple: true
           options: [mon, tue, wed, thu, fri, sat, sun]
     time:
       name: Start time (HH:MM)
-      required: true
+      description: Required for a new event. Omit to preserve an existing value.
       selector:
         text:
     map_id: *map
     cleaning_type:
       name: Cleaning type
-      description: Auto uses the promoted floorplan when available. Map requires one. Whole home ignores maps and no-go boundaries. The robot's current dock state does not affect future schedule events.
-      default: auto
+      description: Auto uses the promoted floorplan when available. Map requires one. Whole home removes zones and ignores no-go boundaries. Omit to preserve an existing target. The robot's current dock state does not affect future events.
       selector:
         select:
           options:
@@ -107,23 +107,21 @@ update_schedule_event:
               value: house
     zone_ids:
       name: Zone IDs
+      description: Omit to preserve an existing zone selection. When changing to another floorplan, supply its zone IDs or an empty list to clean that whole floorplan.
       selector:
         object:
     mode:
       name: Cleaning mode
-      default: eco
       selector:
         select:
           options: [eco, turbo, auto, max]
     navigation:
       name: Navigation mode
-      default: normal
       selector:
         select:
           options: [normal, gentle]
     nogo_enabled:
       name: Respect no-go boundaries
-      default: true
       selector:
         boolean:
 delete_schedule_event:

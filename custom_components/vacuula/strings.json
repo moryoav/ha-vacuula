@@ -74,13 +74,19 @@
       "message": "No enabled or promoted saved map is available. Enable or promote a map in Vacuula, or deliberately choose whole home without a map."
     },
     "map_promotion_required": {
-      "message": "A previous floorplan upload was not confirmed. No-go protection may be absent. Use the Vacuula map action to promote the floorplan successfully before Automatic or mapped cleaning, or explicitly choose whole home without a map."
+      "message": "The floorplan upload status is unknown. Refresh robot data or check the map in Vacuula before Automatic or mapped cleaning. A confirmed inactive map allows Automatic whole-home cleaning without no-go protection."
     },
     "map_promotion_failed": {
       "message": "Floorplan promotion was not confirmed. Any boundary edits may already be saved. The server may have removed the active floorplan and its no-go protection. Check the map in Vacuula and use the Vacuula map action to promote it again."
     },
     "invalid_schedule_boundary": {
       "message": "A schedule boundary must contain a valid ID. If boundaryId and boundary.id are both present, they must match. No schedule changes were sent."
+    },
+    "invalid_schedule_event": {
+      "message": "Creating a schedule event requires enabled, days and time. When event_id is supplied, omitted fields keep their current values."
+    },
+    "schedule_zones_required": {
+      "message": "This event has zones on another floorplan. Supply zone_ids for the new map, or an empty list to select the whole floorplan. No schedule changes were sent."
     },
     "map_cleaning_requires_dock": {
       "message": "Return the robot to its dock before starting mapped cleaning. To clean without no-go lines, deliberately choose whole home without a map."
@@ -103,8 +109,8 @@
   },
   "issues": {
     "map_promotion_required": {
-      "title": "Floorplan upload needs recovery",
-      "description": "A floorplan upload was not confirmed. Vacuula demotes the old floorplan before uploading its replacement, so no-go lines and zones may no longer be active. Automatic and mapped cleaning from this integration are paused until recovery.\n\nCheck the saved boundaries in Vacuula. In Developer tools > Actions, run `vacuula.map_action` for this robot with the floorplan's `map_id` and `action: promote`. A confirmed promotion and status readback clear this notice. The integration does not retry robot commands automatically. Explicit whole-home cleaning without a map remains available. Existing robot schedules and controls outside Home Assistant are not blocked."
+      "title": "Check floorplan status for {robot}",
+      "description": "The floorplan upload status could not be verified for {robot}, map `{map_id}`. Vacuula demotes the old floorplan before uploading its replacement, so no-go protection may be absent.\n\nRefresh robot data to read the current map status. You can also promote or demote the floorplan in the Vacuula app, or run `vacuula.map_action` with this map ID. A successful map read clears this notice when the map is promoted, inactive or removed. An inactive floorplan allows Automatic whole-home cleaning without no-go lines. Removing the robot also clears its notice.\n\nAutomatic and mapped starts wait only while status is unknown. The integration does not retry robot commands automatically. Explicit whole-home cleaning remains available. Existing schedules and controls outside Home Assistant are not blocked."
     }
   },
   "entity": {

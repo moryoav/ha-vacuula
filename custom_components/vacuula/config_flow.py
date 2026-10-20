@@ -104,12 +104,14 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     MINOR_VERSION = 2
 
     def __init__(self) -> None:
+        """Initialize discovery candidates, aliases and per-flow DNS results."""
         self._discovered_url: str | None = None
         self._discovered_servers: dict[str, ZeroconfServiceInfo] = {}
         self._discovered_aliases: set[str] = set()
         self._resolved_urls: dict[str, set[str]] = {}
 
     async def _validate(self, base_url: str) -> tuple[dict[str, Any], list[str]]:
+        """Verify server metadata and retrieve robot IDs for duplicate detection."""
         client = VacuulaClient(async_get_clientsession(self.hass), base_url)
         info = await client.async_server_info()
         robots = await client.async_robots()
@@ -206,6 +208,7 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
+        """Discover unconfigured servers before offering a manual address form."""
         if user_input is None:
             self._discovered_servers.clear()
             for server in await async_discover_servers(self.hass):
@@ -293,6 +296,12 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_zeroconf(
         self, discovery_info: ZeroconfServiceInfo
     ) -> config_entries.ConfigFlowResult:
+        """Validate an advertisement and reconcile existing server identities.
+
+        Update a known robot server's changed address and reload it when active.
+        For manual setup, keep the address form available after discovery fails
+        or finds an already configured server.
+        """
         host = discovery_info.host
         try:
             self._discovered_url = discovery_url(discovery_info)
@@ -340,6 +349,7 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
+        """Revalidate a discovered server before creating its confirmed entry."""
         assert self._discovered_url is not None
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -362,6 +372,7 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
+        """Validate a replacement address without switching to unrelated robots."""
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         if user_input is not None:

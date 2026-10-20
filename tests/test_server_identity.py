@@ -14,6 +14,7 @@ from custom_components.vacuula.const import DOMAIN
 
 
 def advertisement(address="192.0.2.1", port=81, protocol="http"):
+    """Build a Vacuula announcement with configurable endpoint and protocol."""
     return ZeroconfServiceInfo(
         ip_address=address,
         ip_addresses=[address],
@@ -27,6 +28,7 @@ def advertisement(address="192.0.2.1", port=81, protocol="http"):
 
 @pytest.fixture
 def api():
+    """Mock a reachable empty server for endpoint-identity setup tests."""
     with patch("custom_components.vacuula.config_flow.VacuulaClient") as client:
         client.return_value.async_server_info = AsyncMock(
             return_value={"version": "1.0.0", "timezone": "Asia/Jerusalem"}
@@ -37,6 +39,7 @@ def api():
 
 @pytest.fixture
 def resolver():
+    """Resolve test hostnames to the shared IPv4 endpoint without querying DNS."""
     with patch(
         "custom_components.vacuula.config_flow."
         "HomeAssistantTCPConnector.async_resolve_host",
@@ -49,6 +52,7 @@ def resolver():
 async def test_legacy_empty_hostname_entry_remains_single_when_robots_arrive(
     hass, api, resolver
 ):
+    """Deduplicate an empty hostname entry and retain identity when robots appear."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="http://vacuula.local:81",
@@ -78,6 +82,7 @@ async def test_legacy_empty_hostname_entry_remains_single_when_robots_arrive(
 async def test_manual_search_skips_configured_empty_hostname_and_offers_address(
     hass, api, resolver
 ):
+    """Exclude a known empty server from discovery and permit a new manual endpoint."""
     MockConfigEntry(
         domain=DOMAIN, data={"url": "http://vacuula.local:81", "robot_ids": []}
     ).add_to_hass(hass)
@@ -97,6 +102,7 @@ async def test_manual_search_skips_configured_empty_hostname_and_offers_address(
 async def test_conflicting_advertised_hostname_does_not_hide_a_second_server(
     hass, api, resolver
 ):
+    """Use endpoint evidence to distinguish servers advertising the same hostname."""
     MockConfigEntry(
         domain=DOMAIN, data={"url": "http://vacuula.local:81", "robot_ids": []}
     ).add_to_hass(hass)
@@ -115,6 +121,7 @@ async def test_conflicting_advertised_hostname_does_not_hide_a_second_server(
 async def test_discovered_empty_entry_remembers_hostname_for_manual_setup(
     hass, api, resolver
 ):
+    """Remember discovered aliases to prevent duplicate manual hostname setup."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "zeroconf"}, data=advertisement()
     )
@@ -147,6 +154,7 @@ async def test_discovered_empty_entry_remembers_hostname_for_manual_setup(
 async def test_distinct_empty_endpoints_are_not_merged(
     hass, api, resolver, address, port, protocol
 ):
+    """Keep empty servers separate when their address, port or protocol differs."""
     MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -170,6 +178,7 @@ async def test_distinct_empty_endpoints_are_not_merged(
 
 
 async def test_every_advertised_address_is_an_alias(hass, api, resolver):
+    """Recognize IPv6 entries through all advertised endpoint addresses."""
     MockConfigEntry(
         domain=DOMAIN, data={"url": "http://[2001:db8::1]:81", "robot_ids": []}
     ).add_to_hass(hass)
@@ -191,6 +200,7 @@ async def test_every_advertised_address_is_an_alias(hass, api, resolver):
 async def test_alternate_hostname_resolves_to_same_empty_endpoint(
     hass, api, resolver, manual_hostname
 ):
+    """Deduplicate hostnames only after resolving them to the same endpoint."""
     existing = "http://cleaner.example:81" if manual_hostname else "http://192.0.2.1:81"
     entry = MockConfigEntry(domain=DOMAIN, data={"url": existing, "robot_ids": []})
     entry.add_to_hass(hass)
@@ -213,6 +223,7 @@ async def test_alternate_hostname_resolves_to_same_empty_endpoint(
 async def test_unverified_hostname_does_not_merge_empty_servers(
     hass, api, resolver, failure
 ):
+    """Keep servers separate when DNS differs, fails or exceeds the identity timeout."""
     MockConfigEntry(
         domain=DOMAIN, data={"url": "http://other.example:81", "robot_ids": []}
     ).add_to_hass(hass)
@@ -223,6 +234,7 @@ async def test_unverified_hostname_does_not_merge_empty_servers(
     else:
 
         async def never_resolves(host):
+            """Leave DNS pending until the identity-resolution timeout cancels it."""
             await asyncio.Event().wait()
 
         resolver.side_effect = never_resolves
@@ -237,6 +249,7 @@ async def test_unverified_hostname_does_not_merge_empty_servers(
 async def test_nonstandard_shared_connector_cannot_establish_dns_identity(
     hass, api, resolver
 ):
+    """Avoid hostname identity guesses when the HTTP connector cannot verify DNS."""
     entry = MockConfigEntry(
         domain=DOMAIN, data={"url": "http://other.example:81", "robot_ids": []}
     )
@@ -258,6 +271,7 @@ async def test_nonstandard_shared_connector_cannot_establish_dns_identity(
 async def test_malformed_legacy_url_does_not_hide_a_different_valid_endpoint(
     hass, api, resolver, invalid_url
 ):
+    """Ignore malformed old URLs without changing entries or hiding servers."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -285,6 +299,7 @@ async def test_malformed_legacy_url_does_not_hide_a_different_valid_endpoint(
 async def test_empty_reconfigure_does_not_keep_aliases_of_different_endpoint(
     hass, api, resolver
 ):
+    """Drop old endpoint aliases when reconfiguring an empty server to a new address."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -310,6 +325,7 @@ async def test_empty_reconfigure_does_not_keep_aliases_of_different_endpoint(
 
 
 def test_optional_legacy_alias_data_is_validated():
+    """Discard malformed and credential-bearing aliases while retaining valid URLs."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={

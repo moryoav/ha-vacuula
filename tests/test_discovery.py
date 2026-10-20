@@ -36,6 +36,7 @@ def network():
     )
 
     def create_browser(instance, service_type, *, handlers):
+        """Deliver configured Added events through the browser's captured handler."""
         assert instance is state.instance
         assert service_type == discovery.SERVICE_TYPE
         state.handler = handlers[0]
@@ -166,6 +167,7 @@ async def test_removed_record(hass, network):
     original_sleep = asyncio.sleep
 
     async def remove_after_resolution(timeout):
+        """Yield to resolution before emitting the server's Removed event."""
         await original_sleep(0)
         network.handler(
             zeroconf=network.instance,
@@ -183,6 +185,7 @@ async def test_unrelated_service_ignored(hass, network):
     original_constructor = network.browser_constructor.side_effect
 
     def create_browser(*args, **kwargs):
+        """Inject unrelated and nonexistent removal events into normal browsing."""
         browser = original_constructor(*args, **kwargs)
         network.handler(
             zeroconf=network.instance,
@@ -212,6 +215,7 @@ async def test_removed_pending_resolution_drained(hass, network):
     cancelled = asyncio.Event()
 
     async def never_resolves(*args):
+        """Wait for cancellation and mark completion after asynchronous cleanup."""
         try:
             await asyncio.Event().wait()
         finally:
@@ -219,6 +223,7 @@ async def test_removed_pending_resolution_drained(hass, network):
             cancelled.set()
 
     async def remove_pending(timeout):
+        """Remove the advertised server while its resolver is still pending."""
         await original_sleep(0)
         network.handler(
             zeroconf=network.instance,
@@ -241,6 +246,7 @@ async def test_pending_resolution_cancelled(hass, network):
     cancelled = asyncio.Event()
 
     async def never_resolves(*args):
+        """Leave resolution pending until the browse deadline cancels it."""
         try:
             await asyncio.Event().wait()
         finally:
@@ -261,6 +267,7 @@ async def test_flow_cancelled(hass, network):
     cancelled = asyncio.Event()
 
     async def never_resolves(*args):
+        """Signal resolver startup and record cleanup when setup is cancelled."""
         started.set()
         try:
             await asyncio.Event().wait()

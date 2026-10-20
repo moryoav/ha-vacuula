@@ -28,6 +28,8 @@ PARALLEL_UPDATES = 0
 
 @dataclass(frozen=True, kw_only=True)
 class VacuulaBinaryDescription(BinarySensorEntityDescription):
+    """Describe a boolean field and its generation-specific telemetry path."""
+
     source: str = "state"
     gen3_path: tuple[str, ...] = ()
     gen4_path: tuple[str, ...] = ()
@@ -176,12 +178,14 @@ async def async_setup_entry(
     entry: ConfigEntry[VacuulaCoordinator],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    """Register boolean entities and discover newly reported fields on updates."""
     async_add_robot_entities(entry, async_add_entities, create_entities)
 
 
 def create_entities(
     coordinator: VacuulaCoordinator, robot: RobotData
 ) -> list[VacuulaBinarySensor]:
+    """Build known status sensors and disabled diagnostics for extra booleans."""
     descriptions = [
         description
         for description in DESCRIPTIONS
@@ -215,6 +219,8 @@ def create_entities(
 
 
 class VacuulaBinarySensor(VacuulaEntity, BinarySensorEntity):
+    """Expose one confirmed robot boolean without treating missing data as false."""
+
     entity_description: VacuulaBinaryDescription
 
     def __init__(
@@ -223,15 +229,18 @@ class VacuulaBinarySensor(VacuulaEntity, BinarySensorEntity):
         serial: str,
         description: VacuulaBinaryDescription,
     ) -> None:
+        """Bind the sensor to a robot and its telemetry description."""
         super().__init__(coordinator, serial, description.key)
         self.entity_description = description
 
     @property
     def available(self) -> bool:
+        """Keep connectivity visible offline; require known data for other sensors."""
         if self.entity_description.key == "connected":
             return self.coordinator.last_update_success
         return super().available and self.is_on is not None
 
     @property
     def is_on(self) -> bool | None:
+        """Return the current confirmed boolean, or None when it is unknown."""
         return binary_value(self.robot, self.entity_description)

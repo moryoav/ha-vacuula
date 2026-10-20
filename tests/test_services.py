@@ -17,6 +17,7 @@ from custom_components.vacuula.services import _resolve, async_setup_services
 
 @pytest.fixture
 def setup(hass):
+    """Register advanced actions around a connected robot and observable mock I/O."""
     coordinator = MagicMock()
     coordinator.async_command = AsyncMock(
         return_value={"result": "ok", "data": {"value": 1}}
@@ -50,6 +51,7 @@ def setup(hass):
 
     async def command(serial, payload, **kwargs):
         # Mirror the coordinator's deferred selection for focused payload tests.
+        """Resolve deferred payloads and record the final service command."""
         if kwargs.get("refresh_maps"):
             await coordinator.async_refresh_maps(serial)
         if kwargs.get("require_map_recovery"):
@@ -65,6 +67,7 @@ def setup(hass):
 
 
 async def call(hass, setup, service_name, **kwargs):
+    """Invoke an advanced action for the fixture's device and request its response."""
     return await hass.services.async_call(
         DOMAIN,
         service_name,
@@ -75,6 +78,7 @@ async def call(hass, setup, service_name, **kwargs):
 
 
 async def test_targets(hass, setup):
+    """Resolve only loaded Vacuula entries whose coordinator still owns the robot."""
     coordinator, robot, device_id, entry = setup
     assert _resolve(hass, device_id) == (coordinator, robot)
     with pytest.raises(ServiceValidationError):
@@ -89,6 +93,7 @@ async def test_targets(hass, setup):
 
 
 async def test_clean_gen3(hass, setup):
+    """Encode Gen3 cleaning options and reject unsupported selections."""
     coordinator = setup[0]
     await call(hass, setup, "clean")
     assert coordinator.command_payloads[-1] == {
@@ -122,6 +127,7 @@ async def test_clean_gen3(hass, setup):
 
 
 async def test_clean_gen4(hass, setup):
+    """Encode multi-zone Gen4 runs and gate max mode on a supported serial pattern."""
     coordinator, robot, _, _ = setup
     robot.generation = GEN4
     await call(
@@ -142,6 +148,7 @@ async def test_clean_gen4(hass, setup):
 
 
 async def test_schedule(hass, setup):
+    """Route each generation's schedule creation, updates and deletion."""
     coordinator, robot, _, _ = setup
     events = [{"mode": 1, "day": 0, "startTime": "10:30"}]
     await call(hass, setup, "set_schedule", events=events, time_basis="utc")
@@ -177,6 +184,7 @@ async def test_schedule(hass, setup):
 
 
 async def test_boundaries(hass, setup):
+    """Validate generation-specific boundaries and compute missing Gen3 relevancy."""
     coordinator, robot, _, _ = setup
     await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[])
     assert coordinator.command_payloads[-1]["params"]["boundaries"] == []
@@ -215,6 +223,7 @@ async def test_boundaries(hass, setup):
 
 
 async def test_rest_actions(hass, setup):
+    """Route renames and map actions while reporting failed map resource reads."""
     coordinator, robot, _, _ = setup
     await call(hass, setup, "rename_robot", name="New name")
     assert robot.name == "New name"
@@ -234,6 +243,7 @@ async def test_rest_actions(hass, setup):
 
 
 async def test_factory_reset(hass, setup):
+    """Require Gen4 and explicit confirmation before sending a factory reset."""
     coordinator, robot, _, _ = setup
     with pytest.raises(ServiceValidationError):
         await call(hass, setup, "factory_reset", confirm=True)
@@ -264,6 +274,7 @@ async def test_factory_reset(hass, setup):
     ],
 )
 async def test_get_data(hass, setup, resource):
+    """Expose the selected Gen3 command or REST resource through the response action."""
     result = await call(
         hass, setup, "get_data", resource=resource, map_id="map1", run_id="run1"
     )
@@ -271,6 +282,7 @@ async def test_get_data(hass, setup, resource):
 
 
 async def test_get_gen4(hass, setup):
+    """Support Gen4 data resources and reject unsupported or unidentified reads."""
     setup[1].generation = GEN4
     for resource in ("state", "info", "stats", "preferences", "schedule", "boundaries"):
         await call(hass, setup, "get_data", resource=resource, map_id="map1")
@@ -296,6 +308,7 @@ async def test_get_gen4(hass, setup):
     ],
 )
 async def test_schema_rejects_bad_input(hass, setup, action, payload):
+    """Reject malformed schedule, path and cleaning inputs before command dispatch."""
     with pytest.raises(vol.Invalid):
         await call(hass, setup, action, **payload)
     setup[0].async_command.assert_not_awaited()

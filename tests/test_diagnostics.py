@@ -16,6 +16,7 @@ from custom_components.vacuula.diagnostics import (
 
 
 async def test_cached_diagnostics(hass):
+    """Export useful cached telemetry without secrets, mutation or network I/O."""
     serial, name = "PRIVATE-SERIAL", "Private robot name"
     client = SimpleNamespace(
         base_url="http://private-host:81",
@@ -114,6 +115,7 @@ async def test_cached_diagnostics(hass):
 
 
 async def test_empty_and_gen4(hass):
+    """Handle empty entries and unknown Gen4 schedule events in diagnostics."""
     entry = MockConfigEntry(domain=DOMAIN, data={})
     entry.runtime_data = SimpleNamespace(
         client=SimpleNamespace(base_url=""),
@@ -135,6 +137,7 @@ async def test_empty_and_gen4(hass):
 
 
 def test_sanitizer():
+    """Redact private strings and unsupported objects; preserve safe scalars."""
     assert _snapshot(
         {
             "status": "http://hidden.local:81",

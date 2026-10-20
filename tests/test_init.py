@@ -17,11 +17,13 @@ from custom_components.vacuula.const import DOMAIN
 
 
 async def test_setup(hass):
+    """Register the integration's services during domain setup."""
     assert await async_setup(hass, {})
     assert hass.services.has_service(DOMAIN, "clean")
 
 
 async def test_entry_lifecycle(hass):
+    """Own coordinator startup and shutdown and guard removal of listed robots."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     coordinator = MagicMock()
@@ -53,6 +55,7 @@ async def test_entry_lifecycle(hass):
 
 
 async def test_first_refresh_error(hass):
+    """Leave an unreachable entry retryable when its initial refresh fails."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     with patch("custom_components.vacuula.VacuulaCoordinator") as cls:
@@ -64,6 +67,7 @@ async def test_first_refresh_error(hass):
 
 
 async def test_remove_device_when_runtime_not_loaded(hass):
+    """Query the server before allowing device removal from an unloaded entry."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     device = MagicMock(identifiers={(DOMAIN, "old_robot")})

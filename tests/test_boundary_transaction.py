@@ -31,6 +31,7 @@ BOUNDARIES = [
 
 @pytest.fixture
 def boundary_coordinator(hass):
+    """Build a connected Gen4 robot with mocked map storage and promotion."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     client = MagicMock()
@@ -75,6 +76,7 @@ async def test_inactive_map_is_saved_without_becoming_active(boundary_coordinato
 
 
 async def test_failed_save_does_not_promote_previous_boundaries(boundary_coordinator):
+    """Preserve the save failure and never upload the old boundary set."""
     coordinator = boundary_coordinator
     failure = CannotConnect("Boundary save failed")
     coordinator.client.async_map_action.side_effect = failure
@@ -119,6 +121,7 @@ async def test_failed_promotion_cannot_be_reported_as_success(boundary_coordinat
 
 
 async def test_map_missing_from_robot_list_is_never_written(boundary_coordinator):
+    """Reject an absent map using the fresh list before any boundary write."""
     coordinator = boundary_coordinator
     coordinator.robots["robot"].maps = [{"id": "map1", "promoted": True}]
     coordinator.client.async_maps.return_value = [{"id": "other", "promoted": True}]
@@ -129,6 +132,7 @@ async def test_map_missing_from_robot_list_is_never_written(boundary_coordinator
 
 
 async def test_map_lookup_failure_prevents_any_write(boundary_coordinator):
+    """Propagate a failed map lookup without saving or promoting boundaries."""
     coordinator = boundary_coordinator
     failure = CannotConnect("Map lookup failed")
     coordinator.client.async_maps.side_effect = failure
@@ -150,24 +154,29 @@ async def test_other_commands_cannot_interleave_with_map_transaction(
     operations = []
 
     async def stage(name):
+        """Record a transaction stage and hold the selected stage for a competitor."""
         operations.append(name)
         if name == blocked_stage:
             entered_stage.set()
             await release_stage.wait()
 
     async def maps(serial):
+        """Simulate the map lookup while recording its transaction position."""
         await stage("maps")
         return [{"id": "map1", "promoted": True}]
 
     async def map_action(serial, map_id, action, payload=None):
+        """Record and optionally block a boundary save or promotion request."""
         await stage(action)
         return {"ok": True}
 
     async def command(serial, payload):
+        """Record robot-command execution after the map transaction stages."""
         operations.append("command")
         return {"code": 200}
 
     async def competing_command():
+        """Signal the competing read attempt before waiting for the robot lock."""
         command_attempted.set()
         return await coordinator.async_command(
             "robot", {"ability": "state.show"}, refresh=False
@@ -214,6 +223,7 @@ async def test_other_commands_cannot_interleave_with_map_transaction(
 async def test_pending_upload_survives_reload_and_clears_after_confirmed_recovery(
     boundary_coordinator,
 ):
+    """Restore the upload guard after reload and clear it on verified promotion."""
     coordinator = boundary_coordinator
     coordinator._set_pending_promotion("robot", "map1")
     replacement = VacuulaCoordinator(
@@ -234,6 +244,7 @@ async def test_pending_upload_survives_reload_and_clears_after_confirmed_recover
 async def test_unverified_promotion_keeps_repair_and_guard(
     boundary_coordinator, readback
 ):
+    """Keep the repair when readback cannot confirm a promoted floorplan."""
     coordinator = boundary_coordinator
     coordinator.client.async_maps.side_effect = [
         [{"id": "map1", "promoted": True}],
@@ -250,6 +261,7 @@ async def test_unverified_promotion_keeps_repair_and_guard(
 async def test_failed_promotion_and_failed_readback_clear_stale_active_map(
     boundary_coordinator,
 ):
+    """Discard stale active-map data when upload and confirmation both fail."""
     coordinator = boundary_coordinator
     coordinator.client.async_maps.side_effect = [
         [{"id": "map1", "promoted": True}],
@@ -266,6 +278,7 @@ async def test_failed_promotion_and_failed_readback_clear_stale_active_map(
 async def test_cancelled_promotion_leaves_persistent_recovery_guard(
     boundary_coordinator,
 ):
+    """Persist recovery and discard stale maps when promotion is cancelled."""
     coordinator = boundary_coordinator
     coordinator.client.async_map_action.side_effect = [{}, asyncio.CancelledError()]
     with pytest.raises(asyncio.CancelledError):
@@ -278,6 +291,7 @@ async def test_cancelled_promotion_leaves_persistent_recovery_guard(
 
 
 async def test_failed_standalone_promotion_exposes_demoted_state(boundary_coordinator):
+    """Cache the server's demoted map and block cleaning after upload failure."""
     coordinator = boundary_coordinator
     coordinator.client.async_map_action.side_effect = CannotConnect("Upload timed out")
     coordinator.client.async_maps.return_value = [{"id": "map1", "promoted": False}]
@@ -292,6 +306,7 @@ async def test_failed_standalone_promotion_exposes_demoted_state(boundary_coordi
 
 
 async def test_removing_server_cleans_up_its_persistent_repair(boundary_coordinator):
+    """Delete the server's map-promotion repair when its entry is removed."""
     coordinator = boundary_coordinator
     coordinator._set_pending_promotion("robot", "map1")
     issue_id = f"{coordinator.entry.entry_id}_robot_map_promotion"
@@ -304,6 +319,7 @@ async def test_removing_server_cleans_up_its_persistent_repair(boundary_coordina
 async def test_offline_promotion_never_saves_or_creates_recovery(
     boundary_coordinator, operation
 ):
+    """Reject offline uploads before writing boundaries or recording recovery."""
     coordinator = boundary_coordinator
     coordinator.robots["robot"].connected = False
     with pytest.raises(HomeAssistantError) as error:
@@ -320,6 +336,7 @@ async def test_offline_promotion_never_saves_or_creates_recovery(
 
 
 async def test_inactive_boundaries_can_still_be_saved_offline(boundary_coordinator):
+    """Save an inactive map offline without promoting it or creating a guard."""
     coordinator = boundary_coordinator
     coordinator.robots["robot"].connected = False
     coordinator.client.async_maps.return_value = [{"id": "map1", "promoted": False}]
@@ -370,6 +387,7 @@ async def test_rejected_promotion_preserving_active_map_clears_recovery(
 async def test_authoritative_maps_resolve_external_recovery_or_demotion(
     boundary_coordinator, maps, resolved, refresh
 ):
+    """Reconcile recovery from fresh map data without issuing map mutations."""
     coordinator = boundary_coordinator
     coordinator._set_pending_promotion("robot", "map1")
     coordinator.client.async_maps.return_value = maps
@@ -388,6 +406,7 @@ async def test_authoritative_maps_resolve_external_recovery_or_demotion(
 
 
 async def test_pending_upload_bypasses_recent_resource_cache(boundary_coordinator):
+    """Read maps despite a recent poll while promotion recovery is pending."""
     coordinator = boundary_coordinator
     coordinator._set_pending_promotion("robot", "map1")
     coordinator._last_resources["robot"] = monotonic()
@@ -401,11 +420,13 @@ async def test_pending_upload_bypasses_recent_resource_cache(boundary_coordinato
 async def test_poll_cannot_reconcile_previous_map_during_promotion(
     boundary_coordinator,
 ):
+    """Keep polling behind the upload lock until promotion can be confirmed."""
     coordinator = boundary_coordinator
     upload_started = asyncio.Event()
     finish_upload = asyncio.Event()
 
     async def promote(*args):
+        """Hold a successful promotion open until the concurrent poll is queued."""
         upload_started.set()
         await finish_upload.wait()
         return {"promoted": True}
@@ -443,6 +464,7 @@ async def test_poll_cannot_reconcile_previous_map_during_promotion(
 async def test_successful_explicit_demotion_clears_uncertain_upload(
     boundary_coordinator, action
 ):
+    """Clear pending recovery after a confirmed demotion or map deletion."""
     coordinator = boundary_coordinator
     coordinator._set_pending_promotion("robot", "map1")
     await coordinator.async_map_operation("robot", "map1", action)
@@ -450,6 +472,7 @@ async def test_successful_explicit_demotion_clears_uncertain_upload(
 
 
 async def test_failed_demotion_keeps_uncertain_upload(boundary_coordinator):
+    """Retain the recovery marker when the demotion request fails."""
     coordinator = boundary_coordinator
     coordinator._set_pending_promotion("robot", "map1")
     coordinator.client.async_map_action.side_effect = CannotConnect("Disconnected")
@@ -464,6 +487,7 @@ async def test_failed_demotion_keeps_uncertain_upload(boundary_coordinator):
 async def test_unreadable_or_unknown_map_status_retains_recovery(
     boundary_coordinator, map_state
 ):
+    """Keep recovery and invalidate cached maps when status is uncertain."""
     coordinator = boundary_coordinator
     coordinator._set_pending_promotion("robot", "map1")
     coordinator.client.async_maps.return_value = [map_state]
@@ -478,6 +502,7 @@ async def test_unreadable_or_unknown_map_status_retains_recovery(
 
 
 async def test_removed_robot_cleans_only_its_persistent_repair(boundary_coordinator):
+    """Remove only the missing robot's recovery marker and repair notice."""
     coordinator = boundary_coordinator
     coordinator.robots["other"] = RobotData("other", "Upstairs", GEN4, True)
     coordinator._set_pending_promotion("robot", "map1")
@@ -499,6 +524,7 @@ async def test_removed_robot_cleans_only_its_persistent_repair(boundary_coordina
 async def test_removed_robot_loaded_from_options_also_cleans_repair(
     boundary_coordinator,
 ):
+    """Clear a persisted repair for a robot absent from the first snapshot."""
     coordinator = boundary_coordinator
     coordinator._set_pending_promotion("robot", "map1")
     replacement = VacuulaCoordinator(
@@ -514,6 +540,7 @@ async def test_removed_robot_loaded_from_options_also_cleans_repair(
 async def test_repair_identifies_each_robot_and_floorplan_after_reload(
     boundary_coordinator,
 ):
+    """Rebuild each repair with the current robot name and stored map ID."""
     coordinator = boundary_coordinator
     coordinator.robots["other"] = RobotData("other", "Upstairs", GEN4, True)
     coordinator._set_pending_promotion("robot", "map1")

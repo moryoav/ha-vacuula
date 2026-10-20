@@ -29,6 +29,7 @@ MAX_PIXELS = 4_194_304
 
 
 def _chunk(kind: bytes, value: bytes) -> bytes:
+    """Encode a PNG chunk with its length, type, payload and CRC checksum."""
     return (
         struct.pack(">I", len(value))
         + kind
@@ -83,12 +84,14 @@ async def async_setup_entry(
     entry: VacuulaConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    """Discover stored map images and reconcile deleted records on each update."""
     coordinator = entry.runtime_data
     # Shared through the coordinator so removed maps and robots can return.
     known = coordinator.known_entities.setdefault(__name__, {})
 
     @callback
     def add_maps() -> None:
+        """Remove stale map records and add images for newly discovered map IDs."""
         entities: list[VacuulaMapImage] = []
         for serial, robot in coordinator.robots.items():
             if not robot.listed:
@@ -130,6 +133,7 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
     def __init__(
         self, coordinator: VacuulaCoordinator, serial: str, map_id: str
     ) -> None:
+        """Bind a stored map to its robot and initialize the lazy PNG cache."""
         CoordinatorEntity.__init__(self, coordinator)
         ImageEntity.__init__(self, coordinator.hass)
         self.serial = serial
@@ -142,9 +146,11 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
+        """Associate the map image with the existing robot device."""
         return DeviceInfo(identifiers={(DOMAIN, self.serial)})
 
     def _update_map_name(self) -> None:
+        """Refresh the translated entity name from the current stored map name."""
         robot = self.coordinator.robots[self.serial]
         name = next(
             (
@@ -158,6 +164,7 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
 
     @property
     def available(self) -> bool:
+        """Require a successful update and a map still present in the cached list."""
         return super().available and any(
             str(m.get("id")) == self.map_id
             for m in self.coordinator.robots[self.serial].maps
@@ -165,10 +172,12 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
 
     @property
     def image_last_updated(self) -> datetime | None:
+        """Return the last image fetch or cache-invalidation timestamp."""
         return self._updated
 
     @callback
     def _handle_coordinator_update(self) -> None:
+        """Remove deleted maps, follow renames and expire PNGs after five minutes."""
         robot = self.coordinator.robots[self.serial]
         if (
             robot.listed
@@ -185,6 +194,7 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
         super()._handle_coordinator_update()
 
     async def async_image(self) -> bytes | None:
+        """Render a map off the event loop and cache its PNG for five minutes."""
         if not self.available:
             return None
         if self._image is not None and monotonic() - self._fetched < 300:

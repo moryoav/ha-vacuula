@@ -164,6 +164,7 @@ def _snapshot(value: Any, private: tuple[str, ...]) -> Any:
 
 
 def _info(value: dict[str, Any], private: tuple[str, ...]) -> dict[str, Any]:
+    """Copy allowlisted version metadata, redacting private strings recursively."""
     return {
         key: _snapshot(item, private)
         for key, item in value.items()

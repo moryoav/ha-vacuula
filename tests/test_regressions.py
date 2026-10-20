@@ -37,6 +37,7 @@ from custom_components.vacuula.services import _resolve, async_setup_services
 
 @pytest.fixture
 def resource_coordinator(hass):
+    """Create a coordinator backed by the shared generation-aware mock client."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     return VacuulaCoordinator(hass, entry, coordinator_client())
@@ -51,10 +52,12 @@ async def test_poll_is_independent_of_push_and_removed_on_unload(
     coordinator.entry.mock_state(coordinator.hass, ConfigEntryState.SETUP_IN_PROGRESS)
 
     async def server_events():
+        """Keep the server event stream open without yielding pushes."""
         await asyncio.Event().wait()
         yield {}
 
     async def robot_events(serial):
+        """Keep a robot event stream open while fallback polling is exercised."""
         await asyncio.Event().wait()
         yield {}
 
@@ -83,6 +86,7 @@ async def test_poll_is_independent_of_push_and_removed_on_unload(
 
 
 async def test_nullable_capabilities_keep_known_services(resource_coordinator):
+    """Retain known services after null or malformed capability replies."""
     coordinator = resource_coordinator
     coordinator.client.async_command.return_value = {
         "result": "ok",
@@ -110,11 +114,13 @@ async def test_nullable_capabilities_keep_known_services(resource_coordinator):
 async def test_snapshot_cancels_offline_stream_and_restarts_on_reconnect(
     resource_coordinator,
 ):
+    """Cancel disconnected streams and start a new stream only after reconnection."""
     coordinator = resource_coordinator
     coordinator.entry.mock_state(coordinator.hass, ConfigEntryState.SETUP_IN_PROGRESS)
     await coordinator._async_snapshot({"TEST-robot": {"type": GEN3, "connected": True}})
 
     async def events(serial):
+        """Wait indefinitely so snapshot-driven stream cancellation can be observed."""
         await asyncio.Event().wait()
         yield {}
 
@@ -153,6 +159,7 @@ async def test_snapshot_cancels_offline_stream_and_restarts_on_reconnect(
 async def test_malformed_and_unrelated_events_preserve_state(
     resource_coordinator, generation, payload
 ):
+    """Ignore malformed or unrelated push payloads without publishing changed state."""
     coordinator = resource_coordinator
     robot = RobotData("TEST-robot", "Neato", generation, True, state={"state": 1})
     coordinator.robots = {robot.serial: robot}
@@ -163,6 +170,7 @@ async def test_malformed_and_unrelated_events_preserve_state(
 
 
 async def test_optional_missing_response_is_retried(resource_coordinator):
+    """Retry optional reads after transient 404 replies rather than disabling them."""
     coordinator = resource_coordinator
     robot = RobotData("TEST-robot", "Neato", GEN3, True)
     coordinator.client.async_command.side_effect = VacuulaError("missing", status=404)
@@ -172,11 +180,13 @@ async def test_optional_missing_response_is_retried(resource_coordinator):
 
 
 async def test_optional_detail_failure_preserves_cached_metadata(resource_coordinator):
+    """Retain cached robot metadata when optional detail commands are unsupported."""
     coordinator = resource_coordinator
     robot = RobotData("TEST-robot", "Neato", GEN3, True, info={"modelName": "D7"})
     coordinator.robots = {robot.serial: robot}
 
     async def command(serial, payload):
+        """Answer state reads and reject every optional command as unsupported."""
         if payload == {"cmd": "getRobotState"}:
             return {"result": "ok", "state": 1}
         raise UnsupportedCommand("unsupported")
@@ -194,11 +204,13 @@ async def test_optional_detail_failure_preserves_cached_metadata(resource_coordi
 async def test_gen4_absent_language_does_not_discard_cleaning_preferences(
     resource_coordinator,
 ):
+    """Retain Gen4 cleaning options even when the language response is empty."""
     coordinator = resource_coordinator
     robot = RobotData("TEST-robot", "Neato", GEN4, True)
     coordinator.robots = {robot.serial: robot}
 
     async def command(serial, payload):
+        """Expose only cleaning preferences and return empty bodies for other reads."""
         return {
             "code": 200,
             "body": {"mode": "eco"}
@@ -212,11 +224,13 @@ async def test_gen4_absent_language_does_not_discard_cleaning_preferences(
 
 
 async def test_clean_robot_stream_closure_enters_bounded_retry(resource_coordinator):
+    """Close an exhausted event stream before entering its bounded retry delay."""
     coordinator = resource_coordinator
     coordinator.robots = {"TEST-robot": RobotData("TEST-robot", "Neato", GEN3, True)}
     closed = False
 
     async def events(serial):
+        """Yield one state push and record cleanup when the stream closes."""
         nonlocal closed
         try:
             yield {"data": {"type": "state", "data": {"state": 2}}}
@@ -224,6 +238,7 @@ async def test_clean_robot_stream_closure_enters_bounded_retry(resource_coordina
             closed = True
 
     async def retry(delay):
+        """Check the first retry delay and prevent another attempt."""
         assert delay == 1
         coordinator._stopping = True
 
@@ -235,6 +250,7 @@ async def test_clean_robot_stream_closure_enters_bounded_retry(resource_coordina
 
 
 async def test_offline_resources_refresh_without_robot_command(resource_coordinator):
+    """Refresh offline robots' server resources without robot commands."""
     coordinator = resource_coordinator
     coordinator.client.async_robots.return_value["TEST-robot"]["connected"] = False
     coordinator.client.async_maps.return_value = [{"id": "floor", "name": "Home"}]
@@ -264,6 +280,7 @@ async def test_offline_resources_refresh_without_robot_command(resource_coordina
 
 
 async def test_map_operation_serializes_with_robot_command(resource_coordinator):
+    """Hold robot commands until an in-flight map operation releases the shared lock."""
     coordinator = resource_coordinator
     await coordinator._async_update_data()
     coordinator.client.async_command.reset_mock()
@@ -271,6 +288,7 @@ async def test_map_operation_serializes_with_robot_command(resource_coordinator)
     release = asyncio.Event()
 
     async def map_action(*args):
+        """Block the map request until the test releases its transaction."""
         entered.set()
         await release.wait()
         return {"result": "ok"}
@@ -297,6 +315,7 @@ async def test_map_operation_serializes_with_robot_command(resource_coordinator)
 async def test_server_map_settings_update_and_refresh_while_robot_offline(
     resource_coordinator,
 ):
+    """Allow server-side map changes and readback while the robot is disconnected."""
     coordinator = resource_coordinator
     coordinator.robots = {"TEST-robot": RobotData("TEST-robot", "Neato", GEN3, False)}
     coordinator.client.async_update_map = AsyncMock()
@@ -312,6 +331,7 @@ async def test_server_map_settings_update_and_refresh_while_robot_offline(
 async def test_failed_map_settings_update_is_not_retried_or_confirmed(
     resource_coordinator,
 ):
+    """Report a failed map write without retrying or performing a success refresh."""
     from homeassistant.exceptions import HomeAssistantError
 
     coordinator = resource_coordinator
@@ -335,6 +355,7 @@ async def test_failed_map_settings_update_is_not_retried_or_confirmed(
     ],
 )
 async def test_rediscovery_updates_same_robots_without_duplicate(hass, state):
+    """Update a known server's address and reload only entries requiring reload."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="http://old.local:81",
@@ -372,6 +393,7 @@ async def test_rediscovery_updates_same_robots_without_duplicate(hass, state):
 
 
 async def test_reconfigure_rejects_robots_owned_by_other_entry(hass):
+    """Reject reconfiguration to a server whose robot belongs to another entry."""
     entry = MockConfigEntry(
         domain=DOMAIN, data={"url": "http://old.local:81", "robot_ids": []}
     )
@@ -395,6 +417,7 @@ async def test_reconfigure_rejects_robots_owned_by_other_entry(hass):
 
 
 async def test_cached_image_expires_on_coordinator_update(resource_coordinator):
+    """Keep a fresh map image cached and rerender it after its expiration time."""
     coordinator = resource_coordinator
     robot = RobotData("TEST-robot", "Neato", GEN3, True, maps=[{"id": "floor"}])
     coordinator.robots = {robot.serial: robot}
@@ -430,6 +453,7 @@ async def test_cached_image_expires_on_coordinator_update(resource_coordinator):
     ],
 )
 async def test_robot_state_uses_generation_and_unwraps(generation, response, command):
+    """Send the matching generation's state command and unwrap its response body."""
     client, session, _ = protocol_client(response)
     assert await client.async_robot_state("robot", generation) == (
         {"state": 1} if generation == GEN3 else {"state": "idle"}
@@ -438,6 +462,7 @@ async def test_robot_state_uses_generation_and_unwraps(generation, response, com
 
 
 async def test_unknown_generation_never_sends_command():
+    """Reject an unsupported robot generation before making a network request."""
     client, session, _ = protocol_client()
     with pytest.raises(UnsupportedCommand):
         await client.async_robot_state("robot", "future")
@@ -445,12 +470,14 @@ async def test_unknown_generation_never_sends_command():
 
 
 async def test_boundaries_alias_keeps_exact_resource_path():
+    """Read boundaries through the expected map resource path."""
     client, session, _ = protocol_client([{"id": "zone"}])
     assert await client.async_boundaries("robot", "map") == [{"id": "zone"}]
     assert session.request.call_args.args[1].raw_path.endswith("/maps/map/boundaries")
 
 
 async def test_sse_close_releases_http_context_before_returning():
+    """Release the HTTP context when the event generator closes."""
     client, _, response = protocol_client(
         raw=b'data: {"serial":"robot","data":{}}\n\n',
         headers={"Content-Type": "text/event-stream"},
@@ -463,6 +490,7 @@ async def test_sse_close_releases_http_context_before_returning():
 
 @pytest.mark.parametrize("exception", [aiohttp.ClientConnectionError(), TimeoutError()])
 async def test_sse_transport_error_is_safe(exception):
+    """Translate event connection failures into the public connection error type."""
     client, session, response = protocol_client()
     response.__aenter__.side_effect = exception
     with pytest.raises(CannotConnect, match="event connection failed"):
@@ -472,12 +500,14 @@ async def test_sse_transport_error_is_safe(exception):
 
 @pytest.mark.parametrize("status", [401, 403])
 async def test_sse_authentication_error_is_distinct(status):
+    """Distinguish authentication failures from other event connection errors."""
     client, _, _ = protocol_client(status=status)
     with pytest.raises(InvalidAuth):
         await anext(client.async_server_events())
 
 
 def test_sse_ignores_unknown_fields_and_rejects_invalid_event_encoding():
+    """Ignore unsupported SSE fields and reject invalid UTF-8 event names."""
     parser = _SSEParser()
     assert parser.feed(b"id: 2\nretry: 100\ndata: {}\n\n") == [("message", b"{}")]
     with pytest.raises(VacuulaError, match="event encoding"):
@@ -485,12 +515,14 @@ def test_sse_ignores_unknown_fields_and_rejects_invalid_event_encoding():
 
 
 async def test_unsupported_http_status_has_specific_error():
+    """Translate HTTP 501 into an unsupported-command error without leaking the body."""
     client, _, _ = protocol_client(raw=b"PRIVATE", status=501)
     with pytest.raises(UnsupportedCommand):
         await client.async_server_info()
 
 
 async def test_device_removal_refuses_when_server_unreachable(resource_coordinator):
+    """Keep the device when an unreachable server cannot confirm robot removal."""
     coordinator = resource_coordinator
     coordinator.entry.runtime_data = coordinator
     coordinator.client.async_robots.side_effect = CannotConnect("offline")
@@ -501,6 +533,7 @@ async def test_device_removal_refuses_when_server_unreachable(resource_coordinat
 
 
 async def test_device_from_other_integration_is_rejected(hass):
+    """Reject an advanced-action target owned by a different integration."""
     entry = MockConfigEntry(domain="other", data={})
     entry.add_to_hass(hass)
     device = dr.async_get(hass).async_get_or_create(
@@ -520,6 +553,7 @@ async def test_device_from_other_integration_is_rejected(hass):
 async def test_advanced_service_rejects_non_admin_before_resolving_device(
     hass, hass_read_only_user, service, payload
 ):
+    """Enforce administrator access before resolving advanced-action device targets."""
     async_setup_services(hass)
     with patch("custom_components.vacuula.services._resolve") as resolve:
         with pytest.raises(Unauthorized):

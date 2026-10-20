@@ -18,6 +18,7 @@ class LocalServer:
     """A stateful, in-memory substitute for the server protocol."""
 
     def __init__(self, generation):
+        """Initialize stateful protocol mocks and one robot of the chosen generation."""
         self.robots = {}
         self.state = {}
         self.preferences = {}
@@ -42,6 +43,7 @@ class LocalServer:
         self.add_robot("TEST-robot", generation)
 
     def add_robot(self, serial, generation):
+        """Add generation-specific identity, docked state and stored robot settings."""
         self.robots[serial] = {
             "type": generation,
             "name": "D7" if generation == GEN3 else "D10",
@@ -118,6 +120,7 @@ class LocalServer:
             }
 
     async def runs(self, serial):
+        """Return a completed cleaning record using the robot generation's schema."""
         if self.robots[serial]["type"] == GEN3:
             return [
                 {
@@ -224,6 +227,7 @@ class LocalServer:
 
 @pytest.fixture(params=[GEN3, GEN4])
 async def loaded(hass, request):
+    """Load each generation through HA with a stateful server and unload after use."""
     server = LocalServer(request.param)
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -249,6 +253,7 @@ async def loaded(hass, request):
 
 
 def entity_id(hass, domain, key, serial="TEST-robot"):
+    """Resolve a registered robot entity by domain and key or fail clearly."""
     result = er.async_get(hass).async_get_entity_id(domain, DOMAIN, f"{serial}_{key}")
     assert result is not None, (domain, serial, key)
     return result
@@ -257,6 +262,7 @@ def entity_id(hass, domain, key, serial="TEST-robot"):
 async def test_every_platform_loads_translated_entities_and_device(
     hass, loaded, caplog
 ):
+    """Verify platform registration, translated telemetry and device identity."""
     entry, server, generation = loaded
     registry = er.async_get(hass)
     entities = er.async_entries_for_config_entry(registry, entry.entry_id)
@@ -299,6 +305,7 @@ async def test_every_platform_loads_translated_entities_and_device(
 
 
 async def test_native_vacuum_services_execute_once_and_confirm_state(hass, loaded):
+    """Dispatch each native vacuum action once and confirm its resulting activity."""
     _entry, server, generation = loaded
     vacuum = entity_id(hass, "vacuum", "vacuum")
     expected = {
@@ -331,6 +338,7 @@ async def test_native_vacuum_services_execute_once_and_confirm_state(hass, loade
 
 
 async def test_native_button_services_share_confirmed_vacuum_actions(hass, loaded):
+    """Route button actions through the same confirmed commands as vacuum services."""
     _entry, server, generation = loaded
     gen3 = generation == GEN3
     actions = [
@@ -374,6 +382,7 @@ async def test_native_button_services_share_confirmed_vacuum_actions(hass, loade
 
 
 async def test_native_settings_services_preserve_preferences(hass, loaded):
+    """Persist local defaults and confirm robot settings without losing other values."""
     entry, server, generation = loaded
     original_count = server.client.async_command.await_count
     await hass.services.async_call(
@@ -443,6 +452,7 @@ async def test_native_settings_services_preserve_preferences(hass, loaded):
 
 
 async def test_reload_and_unload_keep_registry_identity(hass, loaded):
+    """Preserve entity IDs on reload and stop coordinators when entries unload."""
     entry, _server, _generation = loaded
     original = {
         item.unique_id: item.entity_id
@@ -472,6 +482,7 @@ async def test_reload_and_unload_keep_registry_identity(hass, loaded):
 
 
 async def test_offline_robot_keeps_cached_map_and_refresh_action(hass, loaded):
+    """Preserve cached maps and permit server refresh while a robot is offline."""
     entry, server, _generation = loaded
     coordinator = entry.runtime_data
     server.robots["TEST-robot"]["connected"] = False
@@ -498,6 +509,7 @@ async def test_offline_robot_keeps_cached_map_and_refresh_action(hass, loaded):
 
 
 async def test_push_readiness_blocks_start_and_routes_resume(hass, loaded):
+    """Enforce pushed readiness flags and resume an existing run through Start."""
     entry, server, generation = loaded
     coordinator = entry.runtime_data
     gen3 = generation == GEN3
@@ -505,6 +517,7 @@ async def test_push_readiness_blocks_start_and_routes_resume(hass, loaded):
     partial = {key: {"start": False, "resume": False}}
 
     def event(state):
+        """Wrap partial state in the generation's real push-event envelope."""
         return (
             {"data": {"type": "state", "data": state}}
             if gen3
@@ -537,6 +550,7 @@ async def test_push_readiness_blocks_start_and_routes_resume(hass, loaded):
 
 
 async def test_late_robot_and_telemetry_add_once(hass, loaded):
+    """Discover later robots and telemetry without duplicating registry entities."""
     entry, server, generation = loaded
     coordinator = entry.runtime_data
     registry = er.async_get(hass)

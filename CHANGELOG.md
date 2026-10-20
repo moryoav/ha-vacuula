@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7
+
+- Documented every Python module, class, function and method, including test fixtures, constructors, private helpers and nested callbacks.
+- Enforced 100% docstring coverage with a dependency-free AST audit, regression tests and GitHub checks; empty docstrings and unreadable or invalid source fail validation.
+- Added continuous lint, formatting, strict typing, test and Hassfest checks.
+
 ## 0.1.6
 
 - Allowed a freshly verified, resumable Generation 3 run to return home despite a false `goToBase` flag, matching the app sequence and the D5's accepted command; aligned button and readiness state.

@@ -36,12 +36,14 @@ async def async_setup_entry(
     entry: ConfigEntry[VacuulaCoordinator],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    """Register control buttons and discover capabilities reported after setup."""
     async_add_robot_entities(entry, async_add_entities, create_entities)
 
 
 def create_entities(
     coordinator: VacuulaCoordinator, robot: RobotData
 ) -> list[VacuulaButton]:
+    """Offer standard controls and maintenance actions supported by this robot."""
     keys = ["start", "stop", "pause", "resume", "return_to_base", "refresh"]
     if robot.generation != GEN3 or robot.capabilities.get("findMe"):
         keys.append("locate")
@@ -57,7 +59,10 @@ def create_entities(
 
 
 class VacuulaButton(VacuulaEntity, ButtonEntity):
+    """Expose one robot action with firmware-aware availability checks."""
+
     def __init__(self, coordinator: VacuulaCoordinator, serial: str, key: str) -> None:
+        """Assign the action identity, translated name and configuration category."""
         super().__init__(coordinator, serial, f"button_{key}")
         self.key = key
         self._attr_translation_key = key
@@ -70,6 +75,7 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
+        """Check connection, firmware readiness and action-specific prerequisites."""
         if self.key == "refresh":
             return self.coordinator.last_update_success
         if not super().available:
@@ -98,6 +104,7 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
         return True
 
     async def async_press(self) -> None:
+        """Run the selected control through validated coordinator actions."""
         if not self.available:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="action_unavailable"
@@ -124,6 +131,7 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
         elif self.key == "explore":
 
             def build_command(robot: RobotData) -> dict[str, Any]:
+                """Recheck exploration readiness under the robot command lock."""
                 if not self.available:
                     raise ServiceValidationError(
                         translation_domain=DOMAIN, translation_key="action_unavailable"

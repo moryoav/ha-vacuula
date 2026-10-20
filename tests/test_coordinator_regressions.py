@@ -15,6 +15,7 @@ from custom_components.vacuula.data import RobotData
 
 @pytest.fixture
 def coordinator(hass):
+    """Build a Gen3 coordinator whose entry includes an unrelated saved option."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={"url": "http://test.local:81"},
@@ -78,6 +79,7 @@ async def test_cleaning_defaults_survive_actual_storage_round_trip(
 async def test_optional_robot_error_does_not_disable_later_cleaning_stats(
     coordinator, status
 ):
+    """Retry temporary Gen4 cleaning-stat failures instead of caching unsupported."""
     robot = coordinator.robots["TEST-robot"]
     robot.generation = GEN4
     coordinator.client.async_command.side_effect = [
@@ -93,6 +95,7 @@ async def test_optional_robot_error_does_not_disable_later_cleaning_stats(
 
 
 async def test_explicit_unsupported_reply_still_disables_optional_query(coordinator):
+    """Stop polling an optional read after an explicit unsupported response."""
     robot = coordinator.robots["TEST-robot"]
     coordinator.client.async_command.side_effect = UnsupportedCommand("Not implemented")
     await coordinator._async_optional(robot, "getLocalStats")
@@ -101,6 +104,7 @@ async def test_explicit_unsupported_reply_still_disables_optional_query(coordina
 
 
 async def test_read_only_command_has_no_refresh_fanout(coordinator):
+    """Return a read-only reply without extra commands, maps or history reads."""
     result = await coordinator.async_command(
         "TEST-robot", {"cmd": "getGeneralInfo"}, refresh=False
     )
@@ -113,6 +117,7 @@ async def test_read_only_command_has_no_refresh_fanout(coordinator):
 
 
 async def test_normal_action_reads_only_state(coordinator):
+    """Confirm an ordinary action with one state read and no resource fanout."""
     await coordinator.async_command("TEST-robot", {"cmd": "findMe"})
     assert [
         call.args[1] for call in coordinator.client.async_command.await_args_list
@@ -137,11 +142,13 @@ async def test_normal_action_reads_only_state(coordinator):
 async def test_setting_action_reads_only_changed_resource(
     coordinator, command, generation, query, attribute
 ):
+    """Refresh state and the changed schedule after a scheduling mutation."""
     robot = coordinator.robots["TEST-robot"]
     robot.generation = generation
     selector = "cmd" if generation == GEN3 else "ability"
 
     async def send(serial, payload):
+        """Return schedule data only for the requested confirming query."""
         if payload == {selector: query}:
             return {"data": {"enabled": True}, "code": 200}
         return {"data": {}, "code": 200}
@@ -161,6 +168,7 @@ async def test_setting_action_reads_only_changed_resource(
 
 
 async def test_map_read_is_targeted_and_failed_read_keeps_cache(coordinator):
+    """Refresh only maps and retain their cached list on a failed lookup."""
     coordinator.client.async_maps.return_value = [{"id": "timestamp", "enabled": True}]
     await coordinator.async_refresh_maps("TEST-robot")
     assert coordinator.robots["TEST-robot"].maps == [
@@ -175,10 +183,12 @@ async def test_map_read_is_targeted_and_failed_read_keeps_cache(coordinator):
 
 
 async def test_preference_readback_does_not_fetch_maps_or_history(coordinator):
+    """Merge and confirm preferences without fetching maps or cleaning history."""
     robot = coordinator.robots["TEST-robot"]
     preferences = {"robotSounds": True, "anotherSetting": 7}
 
     async def send(serial, payload):
+        """Apply preference writes and expose the resulting values to readback."""
         if payload.get("cmd") == "getPreferences":
             return {"result": "ok", "data": dict(preferences)}
         if payload.get("cmd") == "setPreferences":

@@ -70,6 +70,7 @@ from custom_components.vacuula.vacuum import (
 
 @pytest.fixture
 def coordinator(hass):
+    """Provide a connected Gen3 robot with mocked control and refresh methods."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     coordinator = VacuulaCoordinator(hass, entry, MagicMock())
@@ -82,10 +83,12 @@ def coordinator(hass):
 
 
 def description(key):
+    """Find the sensor description corresponding to a telemetry key."""
     return next(item for item in DESCRIPTIONS if item.key == key)
 
 
 def test_optional_numeric_values():
+    """Accept finite real values and preserve zero while rejecting invalid types."""
     assert number(True) is None
     assert number("2") is None
     assert number(float("nan")) is None
@@ -114,12 +117,14 @@ def test_optional_numeric_values():
     ],
 )
 def test_gen3_state_values(key, state, expected):
+    """Convert Gen3 state, cleaning and alert fields into expected sensor values."""
     robot = RobotData("x", "x", GEN3, state=state)
     assert sensor_value(robot, description(key)) == expected
 
 
 @pytest.mark.parametrize("invalid", [None, True, "oops", [], {}])
 def test_bad_battery_values(invalid):
+    """Leave invalid or absent battery charge values unknown."""
     robot = RobotData("x", "x", GEN3, state={"details": {"charge": invalid}})
     assert sensor_value(robot, description("battery")) is None
 
@@ -136,10 +141,12 @@ def test_bad_battery_values(invalid):
     ],
 )
 def test_absent_enums_stay_unknown(key):
+    """Avoid inventing enum values when Gen3 telemetry is absent."""
     assert sensor_value(RobotData("x", "x", GEN3), description(key)) is None
 
 
 def test_general_info_sentinels_and_date(coordinator):
+    """Interpret battery sentinels, dates and unavailable optional sensor values."""
     robot = coordinator.robots["robot"]
     robot.info = {
         "battery": {
@@ -167,6 +174,7 @@ def test_general_info_sentinels_and_date(coordinator):
 
 
 def test_confirmed_empty_collections_and_raw_stats(coordinator):
+    """Distinguish unread lists from empty lists and expose valid scalar stats."""
     robot = coordinator.robots["robot"]
     assert sensor_value(robot, description("map_count")) is None
     assert sensor_value(robot, description("run_count")) is None
@@ -196,6 +204,7 @@ def test_confirmed_empty_collections_and_raw_stats(coordinator):
 
 
 def test_gen4_sensors_and_capabilities(coordinator):
+    """Convert Gen4 telemetry and discover settings only when supported."""
     robot = coordinator.robots["robot"]
     robot.generation = GEN4
     robot.state = {
@@ -229,6 +238,7 @@ def test_gen4_sensors_and_capabilities(coordinator):
 
 
 def test_run_timestamps_and_gen3_statistics():
+    """Select the latest Gen3 run and reject invalid timestamps or derived totals."""
     robot = RobotData(
         "x",
         "x",
@@ -274,6 +284,7 @@ def test_run_timestamps_and_gen3_statistics():
 
 
 def test_gen4_run_aggregates():
+    """Aggregate Gen4 run area, pickups, duration and completion status safely."""
     robot = RobotData(
         "x",
         "x",
@@ -317,11 +328,13 @@ def test_gen4_run_aggregates():
     ],
 )
 def test_problem_binary_values(generation, state, expected):
+    """Derive the problem flag from each generation's error representation."""
     desc = next(item for item in BINARY_DESCRIPTIONS if item.key == "problem")
     assert binary_value(RobotData("x", "x", generation, state=state), desc) is expected
 
 
 def test_binary_unknowns_and_connection(coordinator):
+    """Keep connectivity observable offline and honor coordinator availability."""
     robot = coordinator.robots["robot"]
     assert [
         item.entity_description.key for item in binary_entities(coordinator, robot)
@@ -335,6 +348,7 @@ def test_binary_unknowns_and_connection(coordinator):
 
 
 async def test_preference_units_bounds_and_unknown(coordinator):
+    """Convert reminder units, reject invalid values and discover supported numbers."""
     robot = coordinator.robots["robot"]
     robot.preferences = {"filterChangeReminderInterval": 64800}
     desc = next(item for item in NUMBER_DESCRIPTIONS if item.key == "filter_reminder")
@@ -358,6 +372,7 @@ async def test_preference_units_bounds_and_unknown(coordinator):
 
 
 async def test_select_validation_hardware_modes_and_options(coordinator):
+    """Validate local modes and hardware-specific choices before sending settings."""
     robot = coordinator.robots["robot"]
     mode = VacuulaSelect(coordinator, "robot", "cleaning_mode")
     assert mode.options == ["eco", "turbo"]
@@ -384,6 +399,7 @@ async def test_select_validation_hardware_modes_and_options(coordinator):
 
 
 async def test_vacuum_guards_defaults_and_activity(coordinator):
+    """Map robot activity and enforce cleaning readiness and supported modes."""
     robot = coordinator.robots["robot"]
     vacuum = VacuulaVacuum(coordinator, "robot")
     robot.state = {"state": 4, "details": {}, "cleaning": {"mode": 2}}
@@ -416,6 +432,7 @@ async def test_vacuum_guards_defaults_and_activity(coordinator):
 
 
 async def test_buttons_safe_optional_and_refresh(coordinator):
+    """Gate optional buttons and allow refresh independently of robot connection."""
     robot = coordinator.robots["robot"]
     assert "explore" not in {item.key for item in button_entities(coordinator, robot)}
     robot.capabilities.update(logCopy="basic-1", maps="advanced-1")
@@ -443,6 +460,7 @@ async def test_buttons_safe_optional_and_refresh(coordinator):
 
 
 async def test_switches_have_only_verified_payloads(coordinator):
+    """Send the protocol-defined sound, schedule and floorplan switch payloads."""
     robot = coordinator.robots["robot"]
     assert switch_value(robot, "schedule") is None
     robot.schedule = {"enabled": False}
@@ -467,6 +485,7 @@ async def test_switches_have_only_verified_payloads(coordinator):
 
 
 async def test_map_toggle_preserves_name_and_missing_map(coordinator):
+    """Preserve map naming and reject toggles once the map record disappears."""
     robot = coordinator.robots["robot"]
     robot.maps = [{"id": "map-id", "name": "Floor name", "enabled": False}]
     # The coordinator re-reads the stored name before writing (see
@@ -491,6 +510,7 @@ async def test_map_toggle_preserves_name_and_missing_map(coordinator):
 
 
 async def test_schedule_event_preserves_command_and_unknowns(coordinator):
+    """Toggle fresh event data without mutating cached settings or missing events."""
     robot = coordinator.robots["robot"]
     robot.generation = GEN4
     event = {
@@ -515,6 +535,7 @@ async def test_schedule_event_preserves_command_and_unknowns(coordinator):
     stored_event = deepcopy(event)
 
     async def command(serial, payload):
+        """Persist schedule writes and return independent copies for fresh readback."""
         nonlocal stored_event
         if payload["ability"] == "scheduling.show":
             return {"code": 200, "body": {"events": [deepcopy(stored_event)]}}

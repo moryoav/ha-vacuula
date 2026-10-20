@@ -25,7 +25,7 @@ These statuses are a development checklist, subject to independent review.
 | Actions | Ten globally registered administrator actions, explicit schemas and generation checks, translated errors, safe mapped-cleaning defaults, atomic pause/dock and Gen4 boundary upload sequences, local-to-UTC Gen3 schedules, no raw command passthrough, and no automatic command retries. |
 | Diagnostics | Cached allowlisted telemetry including reviewed details/meta fields; server URL, robot identities, maps, and complete schedule contents are excluded. No diagnostic network requests. |
 | Repairs | A persisted marker records an unconfirmed Gen4 floorplan upload. Offline promotions are refused before writes. After a failed upload, the guard and a notice naming the robot and map ID stay until a floorplan is promoted again (here or in the app), the map leaves use, or it is demoted with `map_action`. |
-| Documentation | README includes installation/removal, setup fields, entities, all actions, examples, data updates, supported generations, limitations, and troubleshooting. Protocol notes identify the reviewed API and validation limits. |
+| Documentation | README includes installation/removal, setup fields, entities, all actions, examples, data updates, supported generations, limitations, and troubleshooting. Protocol notes identify the reviewed API and validation limits. All Python definitions have docstrings, with 100% presence coverage enforced by a repository-wide AST audit in pytest and GitHub checks. |
 
 ## Verification boundary
 
@@ -33,17 +33,18 @@ The test environment pins **Home Assistant 2026.10.2**, Python 3.14, and
 `pytest-homeassistant-custom-component` in `requirements_test.txt`. Tests cover
 the client, config flow, coordinator, integration lifecycle, actions, images,
 diagnostics, and regression cases. The [local validation](local-validation.md)
-records 694 passing tests, 99.50% combined line and branch coverage, at least
+records 711 passing tests, 99.50% combined line and branch coverage, at least
 97.12% in every module, 99.32% config-flow coverage, and clean strict mypy
 results for all 19 integration modules. Local coverage rules are marked `done`.
 The strict-typing rule remains `todo` for separate client packaging and formal
 Core registration.
 
-Only D5 read-only telemetry has been checked on hardware. Movement, cleaning,
-preference changes, schedule writes, map changes, log uploads, and factory reset
-were not exercised on hardware. Generation 4 remains source-verified and
-fixture-tested. No app, server, or robot changes are required to run the local
-tests.
+D5 hardware checks include telemetry, Locate, Start, Pause, Resume and a short
+cleaning run followed by Home Assistant's Return to base action. Fresh reads
+confirmed automatic docking after the pause-then-home sequence. Preference
+changes, schedule writes, map changes, log uploads and factory reset were not
+exercised on hardware. Generation 4 remains source-verified and fixture-tested.
+The local test suite uses mocked transports and does not contact the robot.
 
 ## Work before a formal claim
 

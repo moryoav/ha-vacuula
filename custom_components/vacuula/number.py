@@ -24,6 +24,8 @@ PARALLEL_UPDATES = 0
 
 @dataclass(frozen=True, kw_only=True)
 class VacuulaNumberDescription(NumberEntityDescription):
+    """Define a reminder preference or local spot size with its unit conversion."""
+
     preference: str | None = None
     divisor: int = 1
     default: float | None = None
@@ -79,12 +81,14 @@ async def async_setup_entry(
     entry: ConfigEntry[VacuulaCoordinator],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    """Register numeric settings and discover preferences reported after setup."""
     async_add_robot_entities(entry, async_add_entities, create_entities)
 
 
 def create_entities(
     coordinator: VacuulaCoordinator, robot: RobotData
 ) -> list[VacuulaNumber]:
+    """Offer supported Gen3 reminder intervals and future spot-clean dimensions."""
     if robot.generation != GEN3:
         return []
     return [
@@ -99,6 +103,8 @@ def create_entities(
 
 
 class VacuulaNumber(VacuulaEntity, NumberEntity):
+    """Edit a robot reminder interval or a locally stored spot-clean default."""
+
     entity_description: VacuulaNumberDescription
     _attr_entity_category = EntityCategory.CONFIG
     _attr_mode = NumberMode.BOX
@@ -109,11 +115,13 @@ class VacuulaNumber(VacuulaEntity, NumberEntity):
         serial: str,
         description: VacuulaNumberDescription,
     ) -> None:
+        """Bind a numeric setting to its robot, limits and conversion metadata."""
         super().__init__(coordinator, serial, description.key)
         self.entity_description = description
 
     @property
     def native_value(self) -> float | None:
+        """Return the configured number in entity units, or None for invalid data."""
         desc = self.entity_description
         if desc.preference is None:
             value = number(
@@ -127,6 +135,7 @@ class VacuulaNumber(VacuulaEntity, NumberEntity):
 
     @property
     def available(self) -> bool:
+        """Allow offline spot-size edits; require known reminder telemetry."""
         if self.entity_description.preference is None:
             # Spot sizes are defaults stored in Home Assistant; they stay
             # editable while the robot is offline.
@@ -134,6 +143,7 @@ class VacuulaNumber(VacuulaEntity, NumberEntity):
         return super().available and self.native_value is not None
 
     async def async_set_native_value(self, value: float) -> None:
+        """Validate range and step before saving a default or writing a preference."""
         desc = self.entity_description
         minimum = cast(float, desc.native_min_value)
         maximum = cast(float, desc.native_max_value)

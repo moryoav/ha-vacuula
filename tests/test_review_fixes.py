@@ -53,10 +53,12 @@ def unit_coordinator(hass, generation=GEN3):
 
 
 def description(descriptions, key):
+    """Look up an entity description by its telemetry key."""
     return next(item for item in descriptions if item.key == key)
 
 
 def is_state_read(payload):
+    """Recognize the state-read payload for either robot generation."""
     return payload.get("cmd") == "getRobotState" or (
         payload.get("ability") == "state.show"
     )
@@ -71,6 +73,7 @@ async def test_failed_robot_read_keeps_robot_and_controls_available(hass, loaded
     original = server.client.async_command.side_effect
 
     async def timeout(serial, payload):
+        """Time out state reads while leaving other commands usable."""
         if is_state_read(payload):
             raise CommandError("Robot did not answer in time", status=504)
         return await original(serial, payload)
@@ -93,6 +96,7 @@ async def test_failed_robot_read_keeps_robot_and_controls_available(hass, loaded
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)
 async def test_failed_map_read_during_outage_keeps_entities_unavailable(hass, loaded):  # noqa: F811
+    """Keep controls unavailable when a server outage also prevents fresh map reads."""
     entry, server, _generation = loaded
     coordinator = entry.runtime_data
     vacuum = entity_id(hass, "vacuum", "vacuum")
@@ -115,6 +119,7 @@ async def test_failed_map_read_during_outage_keeps_entities_unavailable(hass, lo
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)
 async def test_refresh_button_reports_failed_reads(hass, loaded):  # noqa: F811
+    """Translate map-read failures from the refresh button into an action error."""
     _entry, server, _generation = loaded
     server.client.async_maps.side_effect = CannotConnect("server down")
     with pytest.raises(HomeAssistantError) as error:
@@ -128,6 +133,7 @@ async def test_refresh_button_reports_failed_reads(hass, loaded):  # noqa: F811
 
 
 def test_gen4_informational_notices_are_not_problems():
+    """Ignore informational Gen4 notices but expose a later warning as a problem."""
     robot = RobotData(
         "robot",
         "D10",
@@ -145,6 +151,7 @@ def test_gen4_informational_notices_are_not_problems():
 
 
 def test_gen3_alert_sensor_reports_none_when_no_alert():
+    """Distinguish a cleared Gen3 alert from a named active alert."""
     robot = RobotData("robot", "D5", GEN3, True, state={"error": None, "alert": None})
     alert = description(SENSORS, "alert")
     assert sensor_value(robot, alert) == "none"
@@ -154,6 +161,7 @@ def test_gen3_alert_sensor_reports_none_when_no_alert():
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)
 async def test_removed_robot_returns_with_its_entities(hass, loaded):  # noqa: F811
+    """Recreate a removed device and its entities when the robot reappears."""
     entry, server, _generation = loaded
     coordinator = entry.runtime_data
     devices = dr.async_get(hass)
@@ -164,6 +172,7 @@ async def test_removed_robot_returns_with_its_entities(hass, loaded):  # noqa: F
     original_runs = server.client.async_runs.side_effect
 
     async def runs(serial):
+        """Return history only for robots still listed by the simulated server."""
         return await original_runs(serial) if serial in server.robots else []
 
     server.client.async_runs.side_effect = runs
@@ -193,6 +202,7 @@ async def test_removed_robot_returns_with_its_entities(hass, loaded):  # noqa: F
 
 
 async def test_floorplan_must_be_in_use_and_the_active_one_stays_in_use(hass):
+    """Reject promotion of an unlisted map and unuse of the active floorplan."""
     coordinator = unit_coordinator(hass, GEN4)
     client = coordinator.client
     client.async_maps.return_value = [{"id": "used", "promoted": True}]
@@ -210,6 +220,7 @@ async def test_floorplan_must_be_in_use_and_the_active_one_stays_in_use(hass):
 
 
 async def test_map_switch_keeps_a_name_changed_in_the_app(hass):
+    """Use the freshly read map name when changing its enabled flag."""
     coordinator = unit_coordinator(hass)
     coordinator.robots["robot"].maps = [{"id": "m", "name": "Kitchen", "enabled": True}]
     coordinator.client.async_maps.return_value = [
@@ -222,6 +233,7 @@ async def test_map_switch_keeps_a_name_changed_in_the_app(hass):
 
 
 async def test_applied_map_change_is_not_reported_failed_when_readback_fails(hass):
+    """Treat a successful map write as successful even if its follow-up read fails."""
     coordinator = unit_coordinator(hass)
     coordinator.client.async_maps.side_effect = CannotConnect("read failed")
     await coordinator.async_update_map("robot", "m", "Kitchen", True)
@@ -231,6 +243,7 @@ async def test_applied_map_change_is_not_reported_failed_when_readback_fails(has
 
 
 async def test_map_action_succeeds_when_only_the_readback_fails(hass, setup):  # noqa: F811
+    """Preserve a successful map action result when the later refresh fails."""
     coordinator, robot, _, _ = setup
     robot.generation = GEN4
     coordinator.async_refresh_maps.side_effect = HomeAssistantError("read failed")
@@ -242,6 +255,7 @@ async def test_map_action_succeeds_when_only_the_readback_fails(hass, setup):  #
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)
 async def test_entity_and_device_names_follow_renames(hass, loaded):  # noqa: F811
+    """Update map entity labels and the device name after server-side renames."""
     entry, server, _generation = loaded
     coordinator = entry.runtime_data
     image = entity_id(hass, "image", "map_floor")
@@ -267,6 +281,7 @@ async def test_entity_and_device_names_follow_renames(hass, loaded):  # noqa: F8
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)
 async def test_deleted_map_entities_are_removed_and_can_return(hass, loaded):  # noqa: F811
+    """Remove confirmed deleted maps and recreate returning map entities."""
     entry, server, _generation = loaded
     coordinator = entry.runtime_data
     registry = er.async_get(hass)
@@ -289,6 +304,7 @@ async def test_deleted_map_entities_are_removed_and_can_return(hass, loaded):  #
 
 
 def test_boundary_schema_accepts_what_the_app_stores():
+    """Accept finite app-style boundary coordinates and reject non-finite vertices."""
     boundary = {
         "id": "zone",
         "name": "",
@@ -305,6 +321,7 @@ def test_boundary_schema_accepts_what_the_app_stores():
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)
 async def test_cleaning_defaults_stay_editable_while_robot_offline(hass, loaded):  # noqa: F811
+    """Keep local cleaning mode and spot dimensions editable during disconnection."""
     entry, server, _generation = loaded
     coordinator = entry.runtime_data
     server.robots["TEST-robot"]["connected"] = False
@@ -330,6 +347,7 @@ async def test_cleaning_defaults_stay_editable_while_robot_offline(hass, loaded)
 
 
 async def test_server_outage_reason_is_translated(hass):
+    """Attach the domain and translation key to coordinator server-outage errors."""
     coordinator = unit_coordinator(hass)
     coordinator.client.async_server_info = AsyncMock(side_effect=CannotConnect("down"))
     with pytest.raises(UpdateFailed) as error:
@@ -339,6 +357,7 @@ async def test_server_outage_reason_is_translated(hass):
 
 
 async def test_address_form_defaults_to_vacuula_default_port(hass):
+    """Offer the default Vacuula hostname without forcing an explicit port."""
     with patch(
         "custom_components.vacuula.config_flow.async_discover_servers",
         new=AsyncMock(return_value=[]),
@@ -385,6 +404,7 @@ async def test_servers_behind_one_proxy_address_stay_separate(hass):
 async def test_address_update_keeps_a_unique_id_held_by_an_ignored_discovery(
     hass, caplog
 ):
+    """Update an entry's address without taking an ignored announcement's unique ID."""
     MockConfigEntry(
         domain=DOMAIN, source=SOURCE_IGNORE, unique_id="http://192.0.2.1:81", data={}
     ).add_to_hass(hass)
@@ -407,6 +427,7 @@ async def test_address_update_keeps_a_unique_id_held_by_an_ignored_discovery(
 
 
 async def test_forgetting_a_robot_releases_its_stream_notice_and_entities(hass):
+    """Cancel a forgotten robot's stream and clear recovery and entity bookkeeping."""
     coordinator = unit_coordinator(hass, GEN4)
     stream = asyncio.create_task(asyncio.sleep(60))
     coordinator._streams["robot"] = stream
@@ -426,6 +447,7 @@ async def test_forgetting_a_robot_releases_its_stream_notice_and_entities(hass):
 
 
 async def test_schedule_reread_only_runs_for_a_connected_gen4_robot(hass):
+    """Skip Gen3 schedule rereads and retain Gen4 events after unsupported replies."""
     coordinator = unit_coordinator(hass, GEN3)
     await coordinator._async_read_schedule_locked("robot")
     coordinator.client.async_command.assert_not_awaited()
@@ -437,6 +459,7 @@ async def test_schedule_reread_only_runs_for_a_connected_gen4_robot(hass):
 
 
 async def test_map_switch_reports_a_missing_map_and_a_failed_write(hass):
+    """Distinguish a missing map from a failed enabled-state update."""
     coordinator = unit_coordinator(hass)
     with pytest.raises(ServiceValidationError) as error:
         await coordinator.async_set_map_enabled("robot", "gone", True)
@@ -452,6 +475,7 @@ async def test_map_switch_reports_a_missing_map_and_a_failed_write(hass):
 
 @pytest.mark.parametrize(("errors", "expected"), [(None, "none"), ("bad", None)])
 def test_gen4_cleared_or_malformed_error_lists(errors, expected):
+    """Treat cleared errors as healthy and malformed lists as unknown."""
     robot = RobotData("robot", "D10", GEN4, True, state={"errors": errors})
     assert sensor_value(robot, description(SENSORS, "error")) == expected
     assert binary_value(robot, description(BINARY, "problem")) is (
@@ -460,12 +484,14 @@ def test_gen4_cleared_or_malformed_error_lists(errors, expected):
 
 
 def test_gen4_state_without_an_error_list_reports_nothing():
+    """Keep error sensors unknown when the Gen4 state omits its error collection."""
     robot = RobotData("robot", "D10", GEN4, True, state={"state": "idle"})
     assert sensor_value(robot, description(SENSORS, "error")) is None
     assert binary_value(robot, description(BINARY, "problem")) is None
 
 
 async def test_removing_an_unregistered_stale_entity_only_forgets_it(hass):
+    """Clear stale tracking safely when the entity has no registry entry."""
     coordinator = unit_coordinator(hass)
     entity = VacuulaMapImage(coordinator, "robot", "map1")
     module = type(entity).__module__
@@ -475,6 +501,7 @@ async def test_removing_an_unregistered_stale_entity_only_forgets_it(hass):
 
 
 async def test_schedule_event_name_without_days_uses_the_time(hass):
+    """Use the event's clock time as its label when weekdays are absent."""
     coordinator = unit_coordinator(hass, GEN4)
     coordinator.robots["robot"].schedule = {
         "events": [{"id": "e", "time": "09:30", "enabled": True, "command": {}}]
@@ -495,6 +522,7 @@ async def test_robot_missing_from_vacuula_keeps_its_map_entities(hass, loaded): 
     original_runs = server.client.async_runs.side_effect
 
     async def runs(serial):
+        """Return empty history for an unlisted robot whose maps still exist."""
         return await original_runs(serial) if serial in server.robots else []
 
     # Empty lists for a robot the server does not know are the risky answer.
@@ -522,6 +550,7 @@ async def test_robot_missing_from_vacuula_keeps_its_map_entities(hass, loaded): 
 
 
 async def test_unlisted_robot_keeps_its_schedule_event_switches(hass):
+    """Preserve schedule switches while the robot is absent from the server list."""
     coordinator = unit_coordinator(hass, GEN4)
     robot = coordinator.robots["robot"]
     robot.schedule = {"events": []}

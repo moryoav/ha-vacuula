@@ -29,6 +29,7 @@ from custom_components.vacuula.data import RobotData
 def test_home_readiness_considers_pause_without_inventing_unknown_values(
     generation, home, pause, expected
 ):
+    """Combine home and pause flags without treating malformed values as booleans."""
     gen3 = generation == GEN3
     robot = RobotData(
         "robot",
@@ -49,6 +50,7 @@ def test_home_readiness_considers_pause_without_inventing_unknown_values(
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
 def test_absent_readiness_remains_unknown(generation):
+    """Report unknown return readiness when no command flags are available."""
     description = next(
         item for item in DESCRIPTIONS if item.key == "can_return_to_base"
     )

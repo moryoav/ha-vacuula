@@ -25,6 +25,7 @@ from custom_components.vacuula.const import DOMAIN
     ],
 )
 def test_invalid_urls(value):
+    """Reject addresses with unsupported schemes or unsafe URL components."""
     with pytest.raises(ValueError):
         normalize_url(value)
 
@@ -38,11 +39,13 @@ def test_invalid_urls(value):
     ],
 )
 def test_normalize(value, expected):
+    """Canonicalize host casing, default ports and trailing slashes."""
     assert normalize_url(value) == expected
 
 
 @pytest.fixture
 def no_discovery():
+    """Force manual setup by returning no mDNS server candidates."""
     with patch(
         "custom_components.vacuula.config_flow.async_discover_servers",
         new=AsyncMock(return_value=[]),
@@ -52,6 +55,7 @@ def no_discovery():
 
 @pytest.fixture
 def client():
+    """Mock a reachable server with one known robot for configuration flows."""
     with patch("custom_components.vacuula.config_flow.VacuulaClient") as cls:
         instance = cls.return_value
         instance.async_server_info = AsyncMock(return_value={"version": "1.0.0"})
@@ -60,6 +64,7 @@ def client():
 
 
 async def test_user(hass, client, no_discovery):
+    """Create a normalized manual entry and save its discovered robot IDs."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
@@ -77,6 +82,7 @@ async def test_user(hass, client, no_discovery):
 
 
 async def test_user_errors(hass, client, no_discovery):
+    """Keep the manual form open for invalid URLs and unreachable servers."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
@@ -93,6 +99,7 @@ async def test_user_errors(hass, client, no_discovery):
 
 @pytest.mark.parametrize("same_url", [True, False])
 async def test_duplicate(hass, client, same_url):
+    """Reject duplicate servers identified by URL or overlapping robot IDs."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -108,6 +115,7 @@ async def test_duplicate(hass, client, same_url):
 
 
 def discovery():
+    """Build a realistic IPv4 Vacuula zeroconf advertisement on port 81."""
     return ZeroconfServiceInfo(
         ip_address="192.0.2.1",
         ip_addresses=["192.0.2.1"],
@@ -120,6 +128,7 @@ def discovery():
 
 
 async def test_zeroconf(hass, client):
+    """Confirm a reachable advertised server before creating its entry."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "zeroconf"}, data=discovery()
     )
@@ -131,6 +140,7 @@ async def test_zeroconf(hass, client):
 
 
 async def test_discovery_errors(hass, client):
+    """Abort zeroconf setup for unreachable or already configured servers."""
     client.async_server_info.side_effect = CannotConnect("offline")
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "zeroconf"}, data=discovery()
@@ -147,6 +157,7 @@ async def test_discovery_errors(hass, client):
 
 
 async def test_reconfigure(hass, client):
+    """Validate the replacement server before updating and reloading its URL."""
     entry = MockConfigEntry(
         domain=DOMAIN, data={"url": "http://old.local:81", "robot_ids": ["TEST-robot"]}
     )
@@ -182,6 +193,7 @@ async def test_reconfigure(hass, client):
 
 
 async def test_reconfigure_duplicate(hass, client):
+    """Refuse a replacement URL already assigned to another config entry."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://old.local:81"})
     entry.add_to_hass(hass)
     MockConfigEntry(domain=DOMAIN, data={"url": "http://new.local:81"}).add_to_hass(

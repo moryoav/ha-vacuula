@@ -30,6 +30,7 @@ async def test_promoting_while_action_waits_cannot_send_stale_map_target(
     original_command = coordinator.client.async_command.side_effect
 
     async def maps(serial):
+        """Hold the first map snapshot to queue a competing promotion."""
         nonlocal read_count
         assert serial == robot.serial
         read_count += 1
@@ -40,6 +41,7 @@ async def test_promoting_while_action_waits_cannot_send_stale_map_target(
         return snapshot
 
     async def command(serial, payload):
+        """Record the sent target and the floorplan active during dispatch."""
         name = payload["ability"]
         if name in {"cleaning.start", "scheduling.update"}:
             cleaning = (
@@ -53,6 +55,7 @@ async def test_promoting_while_action_waits_cannot_send_stale_map_target(
         return await original_command(serial, payload)
 
     async def promote():
+        """Promote a new remote floorplan under the coordinator's robot lock."""
         promotion_queued.set()
         async with coordinator._lock(robot.serial):
             remote_maps[:] = [{"id": "new", "promoted": True}]

@@ -20,6 +20,7 @@ from custom_components.vacuula.telemetry import (
 
 
 def test_scalars_keep_raw_boolean_numeric_and_bounded_text():
+    """Expose finite scalar telemetry while bounding text and rejecting other shapes."""
     assert dict(
         scalars(
             {
@@ -70,6 +71,7 @@ def test_scalars_keep_raw_boolean_numeric_and_bounded_text():
     ],
 )
 def test_private_and_identity_keys_are_excluded_at_any_depth(key):
+    """Filter identity and credential field names even inside nested telemetry."""
     assert list(scalars({"safe": {key: "PRIVATE"}})) == []
 
 
@@ -78,10 +80,12 @@ def test_private_and_identity_keys_are_excluded_at_any_depth(key):
     ["https://private.local/path", "user@example.com", "-----BEGIN PRIVATE KEY-----"],
 )
 def test_private_text_is_excluded_without_copying_payload(value):
+    """Filter URLs, email addresses and private-key text from dynamic telemetry."""
     assert list(scalars({"message": value})) == []
 
 
 def test_scalars_stop_at_four_path_components_and_do_not_flatten_arrays():
+    """Bound telemetry traversal depth and leave array contents unexposed."""
     assert list(
         scalars(
             {
@@ -93,6 +97,7 @@ def test_scalars_stop_at_four_path_components_and_do_not_flatten_arrays():
 
 
 def test_keys_encode_each_path_component_without_nested_key_collisions():
+    """Encode telemetry paths without literal and nested separator collisions."""
     paths = [("a|b",), ("a", "b"), ("a%7Cb",), ("a/b",), ("a_b",)]
     keys = [key_and_label("stats", path)[0] for path in paths]
     assert len(keys) == len(set(keys))
@@ -109,6 +114,7 @@ def test_keys_encode_each_path_component_without_nested_key_collisions():
 
 
 def test_latest_record_compares_absolute_timestamps_and_ignores_incomplete():
+    """Choose history by absolute time and ignore incomplete records."""
     robot = RobotData("test", "Neato", GEN4)
     older = {"run": {"timing": {"start": "2026-10-19T12:00:00+03:00"}}}
     latest = {"run": {"start_at": "2026-10-19T10:00:00Z", "marker": 2}}
@@ -133,6 +139,7 @@ def test_latest_record_compares_absolute_timestamps_and_ignores_incomplete():
 
 
 def test_source_data_selects_only_requested_telemetry_and_latest_subrun():
+    """Select the requested telemetry source and the relevant latest subrun data."""
     robot = RobotData(
         "test",
         "Neato",
@@ -154,6 +161,7 @@ def test_source_data_selects_only_requested_telemetry_and_latest_subrun():
 
 @pytest.mark.parametrize("runs", [None, {}, [], [None], ["invalid"]])
 def test_invalid_subrun_containers_return_no_telemetry(runs):
+    """Return empty telemetry for absent or malformed subrun collections."""
     robot = RobotData(
         "test",
         "Neato",
@@ -167,6 +175,7 @@ def test_invalid_subrun_containers_return_no_telemetry(runs):
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
 async def test_dynamic_entities_preserve_raw_values_without_units(hass, generation):
+    """Disable dynamic diagnostics by default and preserve raw values and types."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     coordinator = VacuulaCoordinator(hass, entry, MagicMock())

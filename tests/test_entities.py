@@ -27,6 +27,7 @@ READ_COMMANDS = {
 
 
 def state3():
+    """Return Gen3 docked telemetry with cleaning capabilities and ready controls."""
     return {
         "state": 1,
         "action": 0,
@@ -65,6 +66,7 @@ def state3():
 
 
 def state4():
+    """Return Gen4 docked telemetry with autonomy and cleaning-center details."""
     return {
         "state": "idle",
         "action": "invalid",
@@ -94,6 +96,7 @@ def state4():
 
 @pytest.fixture
 async def loaded(hass):
+    """Load both generations with stateful mock settings and cleanly unload them."""
     entry = MockConfigEntry(
         domain=DOMAIN, unique_id="test-server", data={"url": "http://test.local:81"}
     )
@@ -127,6 +130,7 @@ async def loaded(hass):
     }
 
     async def command(serial, payload):
+        """Serve generation-specific reads and persist settings for confirmation."""
         name = payload.get("cmd") or payload.get("ability")
         body = {}
         if name in ("getRobotState", "state.show"):
@@ -195,12 +199,14 @@ async def loaded(hass):
 
 
 def eid(hass, platform, serial, key):
+    """Resolve an entity by platform, serial and key or fail with its identity."""
     result = er.async_get(hass).async_get_entity_id(platform, DOMAIN, f"{serial}_{key}")
     assert result is not None, (platform, serial, key)
     return result
 
 
 async def test_all_platforms_load_without_control_commands(hass, loaded):
+    """Load all platforms from reads alone and expose only supported telemetry."""
     entry, client, _states = loaded
     assert all(
         (payload.get("cmd") or payload.get("ability")) in READ_COMMANDS
@@ -236,6 +242,7 @@ async def test_all_platforms_load_without_control_commands(hass, loaded):
 
 
 async def test_standard_actions_and_persistent_defaults(hass, loaded):
+    """Persist local cleaning defaults and route native vacuum commands exactly."""
     entry, client, states = loaded
     vacuum3 = eid(hass, "vacuum", "robot3", "vacuum")
     for platform, key, data in (
@@ -334,6 +341,7 @@ async def test_standard_actions_and_persistent_defaults(hass, loaded):
 
 
 async def test_robot_settings_confirmed_by_readback(hass, loaded):
+    """Confirm switch, reminder and language changes through their native services."""
     _entry, client, _states = loaded
     for serial, key in (("robot3", "robot_sounds"), ("robot3", "schedule")):
         entity = eid(hass, "switch", serial, key)
@@ -382,6 +390,7 @@ async def test_robot_settings_confirmed_by_readback(hass, loaded):
 
 
 async def test_push_offline_readiness_and_new_robot(hass, loaded):
+    """Apply readiness and connectivity updates and discover a later robot once."""
     entry, _client, _states = loaded
     coordinator = entry.runtime_data
     robot = coordinator.robots["robot3"]
@@ -425,6 +434,7 @@ async def test_push_offline_readiness_and_new_robot(hass, loaded):
 
 
 async def test_dynamic_map_and_schedule_event_switches(hass, loaded):
+    """Toggle dynamic records without losing settings and remove deleted records."""
     entry, client, _states = loaded
     coordinator = entry.runtime_data
     maps = [{"id": "ground", "name": "Ground floor", "enabled": False}]
@@ -453,6 +463,7 @@ async def test_dynamic_map_and_schedule_event_switches(hass, loaded):
     )
 
     async def update_map(serial, map_id, name, enabled):
+        """Save map enablement while verifying its identity and preserved name."""
         assert (serial, map_id, name) == ("robot3", "ground", "Ground floor")
         maps[0]["enabled"] = enabled
 
@@ -460,6 +471,7 @@ async def test_dynamic_map_and_schedule_event_switches(hass, loaded):
     original_command = client.async_command.side_effect
 
     async def command(serial, payload):
+        """Store schedule edits and expose fresh events alongside normal mock reads."""
         if serial == "robot4":
             if payload.get("ability") == "scheduling.update":
                 events[:] = [deepcopy(payload["event"])]

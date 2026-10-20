@@ -16,6 +16,7 @@ from custom_components.vacuula.data import RobotData, response_data
 
 
 def make_client():
+    """Mock a reachable Gen3 server with successful empty resource replies."""
     client = MagicMock()
     client.async_server_info = AsyncMock(return_value={"version": "1.0.0"})
     client.async_robots = AsyncMock(
@@ -35,12 +36,14 @@ def make_client():
 
 @pytest.fixture
 def coordinator(hass):
+    """Register a config entry and coordinator using the mocked Gen3 server."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     return VacuulaCoordinator(hass, entry, make_client())
 
 
 def test_unwrap():
+    """Extract response dictionaries from both protocol envelope formats."""
     assert response_data({"result": "ok", "data": {}, "state": 4}) == {"state": 4}
     assert response_data({"body": {"state": "idle"}, "code": 200}) == {"state": "idle"}
     assert response_data({"data": {"a": 1}}) == {"a": 1}
@@ -48,6 +51,7 @@ def test_unwrap():
 
 
 async def test_refresh(coordinator):
+    """Refresh robot state while caching optional resources and tracking removal."""
     result = await coordinator._async_update_data()
     robot = result["TEST-robot"]
     assert robot.connected
@@ -61,12 +65,14 @@ async def test_refresh(coordinator):
 
 
 async def test_server_failure(coordinator):
+    """Translate a server-info connection failure into coordinator update failure."""
     coordinator.client.async_server_info.side_effect = CannotConnect("offline")
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
 
 
 async def test_robot_failure_recovery(coordinator, caplog):
+    """Isolate failed robot reads and log one failure followed by recovery."""
     coordinator.client.async_command.side_effect = CannotConnect("offline")
     await coordinator._async_update_data()
     await coordinator._async_update_data()
@@ -81,6 +87,7 @@ async def test_robot_failure_recovery(coordinator, caplog):
 
 
 async def test_optional_failures(coordinator):
+    """Cache unsupported reads while retrying temporary optional failures."""
     robot = RobotData("TEST-robot", "Neato", GEN3, True)
     error = UnsupportedCommand("unsupported")
     error.status = 400
@@ -95,6 +102,7 @@ async def test_optional_failures(coordinator):
 
 
 async def test_gen4_refresh(coordinator):
+    """Read Gen4 preferences and identity while ignoring unknown robot types."""
     coordinator.client.async_robots.return_value = {
         "robot4": {
             "type": GEN4,
@@ -116,6 +124,7 @@ async def test_gen4_refresh(coordinator):
 
 
 async def test_commands(coordinator):
+    """Preserve unrelated preferences and persist validated cleaning defaults."""
     await coordinator._async_update_data()
     robot = coordinator.robots["TEST-robot"]
     robot.preferences = {"robotSounds": True, "brushChangeReminderInterval": 100}
@@ -149,6 +158,7 @@ async def test_commands(coordinator):
 
 
 async def test_push_events(coordinator):
+    """Merge generation-specific state events without losing cached details."""
     await coordinator._async_update_data()
     robot = coordinator.robots["TEST-robot"]
     robot.state = {"details": {"charge": 50, "isDocked": True}}
@@ -178,12 +188,16 @@ async def test_push_events(coordinator):
 
 
 async def test_stream_lifecycle(coordinator):
+    """Start server and robot streams and cancel all subscriptions on shutdown."""
+
     async def robot_stream(serial):
+        """Emit stream readiness and robot state before waiting for cancellation."""
         yield {"_vacuula_stream_opened": True}
         yield {"data": {"type": "state", "data": {"state": 1}}}
         await asyncio.Event().wait()
 
     async def server_stream():
+        """Emit a renamed robot snapshot before waiting for cancellation."""
         yield {"TEST-robot": {"type": GEN3, "name": "Updated", "connected": True}}
         await asyncio.Event().wait()
 
@@ -203,9 +217,11 @@ async def test_stream_lifecycle(coordinator):
 
 
 async def test_reconnect_streams(coordinator):
+    """Retry a failed server event stream until coordinator shutdown."""
     calls = 0
 
     async def server_stream():
+        """Fail the first stream and stop the coordinator on its next attempt."""
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -224,9 +240,11 @@ async def test_reconnect_streams(coordinator):
 
 
 async def test_robot_stream_error(coordinator):
+    """Handle a robot stream failure without leaking a background task."""
     await coordinator._async_snapshot({"TEST-robot": {"type": GEN3, "connected": True}})
 
     async def events(serial):
+        """Raise a connection failure while marking the coordinator as stopping."""
         coordinator._stopping = True
         raise CannotConnect("failed")
         yield {}

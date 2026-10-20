@@ -10,6 +10,7 @@ from custom_components.vacuula.const import DOMAIN
 
 
 async def test_old_house_default_becomes_automatic_and_keeps_other_preferences(hass):
+    """Migrate legacy whole-home defaults without mutating unrelated preferences."""
     old = {
         "other_option": True,
         "cleaning_options": {
@@ -39,6 +40,7 @@ async def test_old_house_default_becomes_automatic_and_keeps_other_preferences(h
     "options", [{}, {"cleaning_options": []}, {"cleaning_options": {"bad": None}}]
 )
 async def test_empty_or_invalid_old_defaults_do_not_break_upgrade(hass, options):
+    """Advance the entry version while preserving absent or malformed defaults."""
     entry = MockConfigEntry(domain=DOMAIN, options=options, minor_version=1)
     entry.add_to_hass(hass)
     assert await async_migrate_entry(hass, entry)
@@ -47,6 +49,7 @@ async def test_empty_or_invalid_old_defaults_do_not_break_upgrade(hass, options)
 
 
 async def test_new_explicit_mapless_choice_is_preserved(hass):
+    """Keep an explicit whole-home choice made after the safety migration."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         version=1,
@@ -59,6 +62,7 @@ async def test_new_explicit_mapless_choice_is_preserved(hass):
 
 
 async def test_future_major_version_is_not_downgraded(hass):
+    """Refuse migration of an unsupported newer major entry version."""
     entry = MockConfigEntry(domain=DOMAIN, version=2, minor_version=1)
     entry.add_to_hass(hass)
     assert not await async_migrate_entry(hass, entry)

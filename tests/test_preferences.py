@@ -14,6 +14,7 @@ from custom_components.vacuula.data import RobotData
 
 
 def coordinator_for(hass):
+    """Build a Gen3 coordinator with cached sound and filter-reminder preferences."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     client = MagicMock()
@@ -33,11 +34,13 @@ def coordinator_for(hass):
 
 
 async def test_concurrent_changes_read_latest_before_merge(hass):
+    """Serialize fresh preference merges so concurrent edits preserve both changes."""
     coordinator = coordinator_for(hass)
     server = {"robotSounds": True, "filterChangeReminderInterval": 43200}
     writes = []
 
     async def command(serial, payload):
+        """Simulate yielding preference reads and writes against shared settings."""
         await asyncio.sleep(0)
         if payload["cmd"] == "getPreferences":
             return {"result": "ok", "data": dict(server)}
@@ -69,6 +72,7 @@ async def test_concurrent_changes_read_latest_before_merge(hass):
     "reply", [{"result": "ok", "data": {}}, {"result": "ok", "data": {"other": 1}}]
 )
 async def test_missing_fresh_preferences_prevent_write(hass, reply):
+    """Reject preference updates when the fresh response lacks required fields."""
     coordinator = coordinator_for(hass)
     coordinator.client.async_command = AsyncMock(return_value=reply)
     with pytest.raises(HomeAssistantError):
@@ -81,6 +85,7 @@ async def test_missing_fresh_preferences_prevent_write(hass, reply):
 
 
 async def test_failed_preference_read_does_not_retry_or_write(hass):
+    """Propagate a failed preference read without retrying or sending a write."""
     coordinator = coordinator_for(hass)
     coordinator.client.async_command = AsyncMock(side_effect=CannotConnect("offline"))
     with pytest.raises(HomeAssistantError):
@@ -114,10 +119,12 @@ async def test_failed_preference_read_does_not_retry_or_write(hass):
 async def test_gen4_settings_preserve_exact_read_body(
     hass, write_ability, read_ability, settings, change
 ):
+    """Merge Gen4 settings while retaining unknown fields and the write ability."""
     coordinator = coordinator_for(hass)
     coordinator.robots["robot"].generation = GEN4
 
     async def command(serial, payload):
+        """Return the requested settings body and acknowledge subsequent writes."""
         if payload["ability"] == read_ability:
             return {"code": 200, "body": dict(settings)}
         return {"code": 200, "body": {}}
@@ -132,6 +139,7 @@ async def test_gen4_settings_preserve_exact_read_body(
 
 
 async def test_failed_gen4_settings_read_prevents_write(hass):
+    """Refuse a Gen4 language write when its prerequisite settings read is empty."""
     coordinator = coordinator_for(hass)
     coordinator.robots["robot"].generation = GEN4
     coordinator.client.async_command = AsyncMock(return_value={"code": 200, "body": {}})

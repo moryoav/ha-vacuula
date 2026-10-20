@@ -54,6 +54,7 @@ def schedule_setup(hass):
     writes = []
 
     async def command(serial, payload):
+        """Read and replace a remote schedule while recording exact event writes."""
         assert serial == "TEST-robot"
         ability = payload["ability"]
         if ability == "scheduling.show":
@@ -84,6 +85,7 @@ def schedule_setup(hass):
 
 
 async def call(hass, setup, **changes):
+    """Invoke a patch of the shared existing event through the registered service."""
     return await hass.services.async_call(
         DOMAIN,
         "update_schedule_event",
@@ -99,6 +101,7 @@ async def call(hass, setup, **changes):
 async def test_metadata_patch_preserves_all_fresh_cleaning_settings(
     hass, schedule_setup, changes
 ):
+    """Merge event metadata from fresh data without rewriting cleaning settings."""
     coordinator, robot, _, server, writes = schedule_setup
     before = deepcopy(server["events"][0])
     caller_data = deepcopy(changes)
@@ -129,6 +132,7 @@ async def test_metadata_patch_preserves_all_fresh_cleaning_settings(
 async def test_explicit_setting_patches_each_run_and_preserves_other_fields(
     hass, schedule_setup, changes, setting, value
 ):
+    """Patch each run's selected setting without losing unknown fields."""
     before = deepcopy(schedule_setup[3]["events"][0])
     expected = deepcopy(before)
     for run in expected["command"]["runs"]:
@@ -141,6 +145,7 @@ async def test_explicit_setting_patches_each_run_and_preserves_other_fields(
 async def test_nogo_patch_preserves_zone_ids_and_individual_settings(
     hass, schedule_setup
 ):
+    """Change no-go handling while keeping each zone target and run settings intact."""
     expected = deepcopy(schedule_setup[3]["events"][0])
     for run in expected["command"]["runs"]:
         run["map"]["nogo_enabled"] = True
@@ -155,6 +160,7 @@ async def test_nogo_patch_preserves_zone_ids_and_individual_settings(
 async def test_explicit_map_selection_preserves_zones_and_run_options(
     hass, schedule_setup, selection
 ):
+    """Keep existing zoned runs when the selected floorplan remains the same."""
     coordinator, _, _, server, writes = schedule_setup
     expected = deepcopy(server["events"][0])
     await call(hass, schedule_setup, **selection)
@@ -168,6 +174,7 @@ async def test_explicit_map_selection_preserves_zones_and_run_options(
 async def test_other_floorplan_requires_explicit_zone_choice(
     hass, schedule_setup, selection
 ):
+    """Reject a floorplan change that could silently discard selected zones."""
     coordinator, _, _, _, writes = schedule_setup
     coordinator.client.async_maps.return_value = [{"id": "map2", "promoted": True}]
     with pytest.raises(ServiceValidationError) as error:
@@ -180,6 +187,7 @@ async def test_other_floorplan_requires_explicit_zone_choice(
 async def test_other_floorplan_with_explicit_zones_changes_target(
     hass, schedule_setup, zones
 ):
+    """Retarget a schedule with an explicit zone choice while retaining run options."""
     _, _, _, server, writes = schedule_setup
     expected = deepcopy(server["events"][0])
     run = expected["command"]["runs"][0]
@@ -201,6 +209,7 @@ async def test_other_floorplan_with_explicit_zones_changes_target(
 async def test_explicit_zones_replace_selection_without_erasing_run_options(
     hass, schedule_setup, zones
 ):
+    """Reuse matching zone options and template unknown zones from the first run."""
     before = deepcopy(schedule_setup[3]["events"][0])
     await call(hass, schedule_setup, zone_ids=zones)
     runs = schedule_setup[4][0]["command"]["runs"]
@@ -218,6 +227,7 @@ async def test_explicit_zones_replace_selection_without_erasing_run_options(
 
 
 async def test_explicit_whole_home_target_removes_zone_runs(hass, schedule_setup):
+    """Replace mapped zone runs with a single explicit mapless run."""
     coordinator, _, _, server, writes = schedule_setup
     coordinator.client.async_maps.return_value = []
     expected = deepcopy(server["events"][0])
@@ -238,6 +248,7 @@ async def test_automatic_without_promoted_map_keeps_zoned_event(hass, schedule_s
 
 @pytest.mark.parametrize("field", ["enabled", "days", "time"])
 async def test_new_event_requires_its_clock_fields(hass, schedule_setup, field):
+    """Reject new events missing enabled state, weekdays or start time before I/O."""
     payload = {"enabled": True, "days": ["sun"], "time": "12:00"}
     payload.pop(field)
     with pytest.raises(ServiceValidationError) as error:
@@ -257,6 +268,7 @@ async def test_new_event_requires_its_clock_fields(hass, schedule_setup, field):
 async def test_missing_or_ambiguous_event_never_creates_or_overwrites(
     hass, schedule_setup, events
 ):
+    """Refuse updates unless exactly one fresh event matches the requested ID."""
     coordinator, _, _, server, writes = schedule_setup
     server["events"] = events
     with pytest.raises(ServiceValidationError) as error:
@@ -272,6 +284,7 @@ async def test_missing_or_ambiguous_event_never_creates_or_overwrites(
 async def test_schedule_failure_does_not_retry_or_send_stale_values(
     hass, schedule_setup, failure
 ):
+    """Stop on connection or I/O failure without retrying stale updates."""
     coordinator, robot, _, _, writes = schedule_setup
     if failure == "offline":
         robot.connected = False
@@ -281,6 +294,7 @@ async def test_schedule_failure_does_not_retry_or_send_stale_values(
         original = coordinator.client.async_command.side_effect
 
         async def fail_write(serial, payload):
+            """Fail the event update after its prerequisite read completes."""
             if payload["ability"] == "scheduling.update":
                 raise CannotConnect("timeout")
             return await original(serial, payload)
@@ -296,6 +310,7 @@ async def test_schedule_failure_does_not_retry_or_send_stale_values(
 
 
 async def test_concurrent_updates_merge_under_one_robot_lock(hass, schedule_setup):
+    """Serialize event patches so the second write preserves the first edit."""
     coordinator, _, _, server, writes = schedule_setup
     first_read = asyncio.Event()
     release = asyncio.Event()
@@ -304,6 +319,7 @@ async def test_concurrent_updates_merge_under_one_robot_lock(hass, schedule_setu
     reads = 0
 
     async def hold_first_read(serial, payload):
+        """Hold the first schedule read to expose concurrent transaction ordering."""
         nonlocal reads
         if payload["ability"] == "scheduling.show":
             reads += 1
@@ -313,6 +329,7 @@ async def test_concurrent_updates_merge_under_one_robot_lock(hass, schedule_setu
         return await original(serial, payload)
 
     async def second_call():
+        """Signal the second patch before requesting its mode change."""
         second_started.set()
         await call(hass, schedule_setup, mode="eco")
 
@@ -358,6 +375,7 @@ async def test_concurrent_updates_merge_under_one_robot_lock(hass, schedule_setu
 async def test_unrecognized_cleaning_commands_are_never_rebuilt(
     hass, schedule_setup, command
 ):
+    """Reject cleaning-option patches for unsupported or malformed stored commands."""
     _, _, _, server, writes = schedule_setup
     server["events"][0]["command"] = command
     with pytest.raises(ServiceValidationError) as error:
@@ -370,6 +388,7 @@ async def test_unrecognized_cleaning_commands_are_never_rebuilt(
 async def test_metadata_patch_preserves_unrecognized_command(
     hass, schedule_setup, command
 ):
+    """Allow metadata edits without interpreting or rewriting an unknown command."""
     _, _, _, server, writes = schedule_setup
     server["events"][0]["command"] = command
     expected = {**deepcopy(server["events"][0]), "enabled": False}
@@ -381,6 +400,7 @@ async def test_metadata_patch_preserves_unrecognized_command(
 async def test_explicit_whole_home_with_map_or_zones_is_rejected(
     hass, schedule_setup, changes
 ):
+    """Reject conflicting whole-home and mapped target selections without writing."""
     with pytest.raises(ServiceValidationError) as error:
         await call(hass, schedule_setup, cleaning_type="house", **changes)
     assert error.value.translation_key == "invalid_option"
@@ -390,6 +410,7 @@ async def test_explicit_whole_home_with_map_or_zones_is_rejected(
 async def test_explicit_empty_zone_list_preserves_whole_home_target(
     hass, schedule_setup
 ):
+    """Keep a mapless run when explicitly clearing zones and enabling no-go handling."""
     _, _, _, server, writes = schedule_setup
     event = server["events"][0]
     event["command"]["runs"] = [{**event["command"]["runs"][0], "map": None}]
@@ -400,6 +421,7 @@ async def test_explicit_empty_zone_list_preserves_whole_home_target(
 
 @pytest.mark.parametrize("targets", [[None], ["map1", "map2"], [123]])
 async def test_zones_need_one_identified_floorplan(hass, schedule_setup, targets):
+    """Reject zone changes when stored runs do not identify one usable floorplan."""
     _, _, _, server, writes = schedule_setup
     event = server["events"][0]
     template = deepcopy(event["command"]["runs"][0])
@@ -419,6 +441,7 @@ async def test_zones_need_one_identified_floorplan(hass, schedule_setup, targets
 
 
 async def test_removed_robot_is_rejected_without_read_or_write(schedule_setup):
+    """Refuse event updates for a robot removed from coordinator state before I/O."""
     coordinator, robot, _, _, _ = schedule_setup
     coordinator.robots.clear()
     with pytest.raises(HomeAssistantError) as error:
@@ -432,12 +455,14 @@ async def test_removed_robot_is_rejected_without_read_or_write(schedule_setup):
 async def test_merge_never_mutates_response_objects_from_the_client(
     hass, schedule_setup
 ):
+    """Copy nested response data before merging requested schedule changes."""
     coordinator, _, _, server, writes = schedule_setup
     response = {"body": deepcopy(server)}
     original_response = deepcopy(response)
     original = coordinator.client.async_command.side_effect
 
     async def shared_response(serial, payload):
+        """Return the same schedule object to expose accidental in-place mutation."""
         if payload["ability"] == "scheduling.show":
             return response
         return await original(serial, payload)

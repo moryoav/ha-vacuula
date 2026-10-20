@@ -11,6 +11,7 @@ from custom_components.vacuula.client import VacuulaClient, unwrap
 
 
 async def check(url: str) -> None:
+    """Verify REST reads and event streams, printing telemetry without robot writes."""
     async with aiohttp.ClientSession() as session:
         client = VacuulaClient(session, url)
         info = await client.async_server_info()

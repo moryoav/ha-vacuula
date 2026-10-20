@@ -8,6 +8,7 @@ from custom_components.vacuula.client import VacuulaError
 
 @pytest.mark.parametrize("number", [b"1e999", b"-1e999"])
 async def test_json_exponent_overflow_is_rejected_in_http(number):
+    """Reject HTTP JSON exponents that overflow to non-finite Python floats."""
     client, _, _ = make_client(raw=b'{"charge":' + number + b"}")
     with pytest.raises(VacuulaError, match="Invalid JSON"):
         await client.async_server_info()
@@ -15,6 +16,7 @@ async def test_json_exponent_overflow_is_rejected_in_http(number):
 
 @pytest.mark.parametrize("number", [b"1e999", b"-1e999"])
 async def test_json_exponent_overflow_is_rejected_in_events(number):
+    """Reject non-finite exponent values while decoding server event JSON."""
     client, _, _ = make_client(
         raw=b'event: robots\ndata: {"robot":{"charge":' + number + b"}}\n\n",
         headers={"Content-Type": "text/event-stream"},
@@ -24,5 +26,6 @@ async def test_json_exponent_overflow_is_rejected_in_events(number):
 
 
 async def test_finite_exponents_remain_valid():
+    """Decode a valid finite exponent without changing its numeric value."""
     client, _, _ = make_client(raw=b'{"temperature":1.25e2}')
     assert await client.async_server_info() == {"temperature": 125.0}

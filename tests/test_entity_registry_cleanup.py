@@ -17,6 +17,7 @@ from custom_components.vacuula.image import async_setup_entry as setup_images
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)
 async def test_disabled_map_records_are_removed(hass, loaded):  # noqa: F811
+    """Remove disabled map entities and rediscover them with disabled preferences."""
     entry, server, _generation = loaded
     registry = er.async_get(hass)
     image = entity_id(hass, "image", "map_floor")
@@ -51,6 +52,7 @@ async def test_disabled_map_records_are_removed(hass, loaded):  # noqa: F811
 
 @pytest.mark.parametrize("loaded", [GEN4], indirect=True)
 async def test_disabled_schedule_event_is_removed_and_can_return(hass, loaded):  # noqa: F811
+    """Remove and rediscover a disabled event while preserving its user preference."""
     entry, server, _generation = loaded
     registry = er.async_get(hass)
     event = {
@@ -64,6 +66,7 @@ async def test_disabled_schedule_event_is_removed_and_can_return(hass, loaded): 
     original = server.client.async_command.side_effect
 
     async def command(serial, payload):
+        """Serve current schedule snapshots while forwarding other mock commands."""
         if payload.get("ability") == "scheduling.show":
             return {"code": 200, "body": {"events": deepcopy(events)}}
         return await original(serial, payload)
@@ -92,6 +95,7 @@ async def test_disabled_schedule_event_is_removed_and_can_return(hass, loaded): 
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)
 async def test_failed_read_does_not_remove_disabled_map_records(hass, loaded):  # noqa: F811
+    """Retain disabled map entities when map lookup fails instead of returning empty."""
     entry, server, _generation = loaded
     registry = er.async_get(hass)
     records = [
@@ -110,6 +114,7 @@ async def test_failed_read_does_not_remove_disabled_map_records(hass, loaded):  
 
 
 async def test_map_image_discovery_ignores_invalid_ids(hass):
+    """Skip map image creation for missing, empty or non-string identifiers."""
     entry = MockConfigEntry(domain=DOMAIN, data={})
     entry.add_to_hass(hass)
     coordinator = VacuulaCoordinator(hass, entry, MagicMock())
@@ -129,6 +134,7 @@ async def test_map_image_discovery_ignores_invalid_ids(hass):
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)
 async def test_rapid_map_delete_and_return_keeps_entities(hass, loaded):  # noqa: F811
+    """Rediscover maps deleted and restored before registry tasks can run."""
     entry, server, _generation = loaded
     coordinator = entry.runtime_data
     registry = er.async_get(hass)
@@ -151,6 +157,7 @@ async def test_rapid_map_delete_and_return_keeps_entities(hass, loaded):  # noqa
 
 @pytest.mark.parametrize("loaded", [GEN4], indirect=True)
 async def test_rapid_schedule_delete_and_return_keeps_entity(hass, loaded):  # noqa: F811
+    """Restore an event removed and re-added before HA processes pending tasks."""
     entry, _server, _generation = loaded
     coordinator = entry.runtime_data
     robot = coordinator.robots["TEST-robot"]
@@ -173,6 +180,7 @@ async def test_map_cleanup_preserves_other_robot_with_overlapping_prefix(
     hass,
     loaded,  # noqa: F811
 ):
+    """Scope map cleanup to the owning robot despite overlapping serial prefixes."""
     entry, server, _generation = loaded
     coordinator = entry.runtime_data
     other_serial = "TEST-robot_map_other"

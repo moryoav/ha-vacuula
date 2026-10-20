@@ -35,6 +35,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         entry: ConfigEntry[VacuulaCoordinator],
         client: VacuulaClient,
     ) -> None:
+        """Restore cleaning defaults and map recovery guards, then initialize caches."""
         super().__init__(
             hass,
             _LOGGER,
@@ -70,10 +71,12 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         self.known_entities: dict[str, dict[str, set[str]]] = {}
 
     def _update_capabilities(self, robot: RobotData) -> None:
+        """Merge Gen3 service capabilities advertised in the latest robot state."""
         if isinstance(services := robot.state.get("availableServices"), dict):
             robot.capabilities.update(services)
 
     def _lock(self, serial: str) -> asyncio.Lock:
+        """Return the shared per-robot lock for reads and command transactions."""
         return self._locks.setdefault(serial, asyncio.Lock())
 
     @callback
@@ -107,6 +110,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             self._set_pending_promotion(serial, None)
 
     async def _async_update_data(self) -> dict[str, RobotData]:
+        """Poll the server and refresh listed robots with throttled details."""
         try:
             self.server_info = await self.client.async_server_info()
             snapshot = await self.client.async_robots()
@@ -124,6 +128,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         return self.robots
 
     async def _async_snapshot(self, snapshot: dict[str, dict[str, Any]]) -> None:
+        """Reconcile robot metadata, connection changes and event subscriptions."""
         robot_ids = sorted(snapshot)
         if self.entry.data.get("robot_ids") != robot_ids:
             self.hass.config_entries.async_update_entry(
@@ -173,6 +178,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 self._ensure_stream(serial)
 
     def _ensure_stream(self, serial: str) -> None:
+        """Create at most one event task for a connected robot unless stopping."""
         if self._stopping or not self.robots[serial].connected:
             return
         if (existing := self._streams.get(serial)) and not existing.done():
@@ -195,6 +201,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         )
 
     async def _async_poll(self, now: Any) -> None:
+        """Request the polling fallback refresh while the integration is running."""
         if not self._stopping:
             await self.async_request_refresh()
 
@@ -214,6 +221,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         self._server_stream = None
 
     async def _async_server_stream(self) -> None:
+        """Apply server snapshots and reconnect with bounded exponential backoff."""
         delay = 1
         while not self._stopping:
             try:
@@ -230,6 +238,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 delay = min(delay * 2, 60)
 
     async def _async_robot_stream(self, serial: str) -> None:
+        """Subscribe before reading state, then reconnect after stream failures."""
         delay = 1
         while not self._stopping and self.robots[serial].connected:
             try:
@@ -247,6 +256,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 delay = min(delay * 2, 60)
 
     def _handle_event(self, serial: str, event: dict[str, Any]) -> None:
+        """Merge recognized partial state events without discarding cached fields."""
         robot = self.robots[serial]
         payload = event.get("data", {})
         if not isinstance(payload, dict):
@@ -275,6 +285,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
     async def _async_optional(
         self, robot: RobotData, command: str
     ) -> dict[str, Any] | None:
+        """Read optional telemetry, caching only explicitly unsupported commands."""
         if (robot.serial, command) in self._unsupported:
             return None
         payload = {"cmd" if robot.generation == GEN3 else "ability": command}
@@ -311,6 +322,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         return True
 
     async def _async_refresh_robot(self, serial: str, *, full: bool = False) -> bool:
+        """Read locked robot state and throttle optional details to five minutes."""
         robot = self.robots[serial]
         async with self._lock(serial):
             if not await self._async_read_state_locked(robot):
@@ -352,6 +364,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
     async def _async_refresh_resources(
         self, serial: str, *, full: bool = False
     ) -> bool:
+        """Refresh stored maps and history, bypassing throttling during map recovery."""
         if (
             not full
             and serial not in self._pending_promotions
@@ -376,9 +389,11 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
     async def async_refresh_robot(self, serial: str, *, full: bool = False) -> bool:
         """Read the latest state and saved maps, and notify entity listeners.
 
-        Return whether the reads succeeded. Listeners are notified without
-        marking the coordinator healthy: only the server poll and event stream
-        decide availability, so a failed read during an outage cannot restore it.
+        Return whether attempted state and map reads succeeded; throttled or
+        skipped reads count as successful and history failures are ignored.
+        Listeners are notified without marking the coordinator healthy: only
+        the server poll and event stream decide availability, so a failed read
+        during an outage cannot restore it.
         """
         state_read = True
         if self.robots[serial].connected:
@@ -446,12 +461,14 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             return result
 
     def _require_robot_connection(self, serial: str) -> None:
+        """Reject commands when server metadata no longer shows the robot connected."""
         if serial not in self.robots or not self.robots[serial].connected:
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="offline"
             )
 
     def _create_promotion_issue(self, serial: str, map_id: str) -> None:
+        """Create a persistent repair notice naming the robot and uncertain map."""
         ir.async_create_issue(
             self.hass,
             DOMAIN,
@@ -467,6 +484,11 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         )
 
     def _set_pending_promotion(self, serial: str, map_id: str | None) -> None:
+        """Persist or clear the upload guard and synchronize its repair notice.
+
+        While promotion is pending, hide cached maps so they cannot authorize
+        cleaning with a floorplan whose upload has not been confirmed.
+        """
         pending = dict(self._pending_promotions)
         if map_id is None:
             pending.pop(serial, None)
@@ -514,6 +536,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             self._set_pending_promotion(serial, None)
 
     async def _async_read_maps_locked(self, serial: str) -> None:
+        """Refresh authoritative maps and reconcile recovery under the robot lock."""
         robot = self.robots[serial]
         try:
             robot.maps = await self.client.async_maps(serial)
@@ -540,6 +563,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 self.async_update_listeners()
 
     async def _async_confirm_promotion_locked(self, serial: str, map_id: str) -> None:
+        """Verify the promoted map and refresh schedules that firmware may disable."""
         try:
             await self._async_read_maps_locked(serial)
         except VacuulaError as err:
@@ -814,6 +838,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         robot = self.robots[serial]
 
         def command_allowed(flag: str) -> Any:
+            """Read a native flag, retaining unknown availability as None."""
             key = (
                 "availableCommands"
                 if robot.generation == GEN3

@@ -1,22 +1,25 @@
 # Local validation, 20 October 2026
 
-Integration version: **0.1.6**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.7**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
 
 ## Automated checks
 
-- **694 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery and the protocol/state regressions below.
+- **711 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery, docstring enforcement and the protocol/state regressions below.
 - **99.50% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
-- Strict mypy: **passed**, all 19 modules.
+- Strict mypy: **passed**, all 21 integration and tool modules.
+- **100% docstring coverage: 779/779 items in 55 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
+- Actionlint: **passed**, GitHub workflow syntax and expressions validated.
 
 Run from the source folder on this development machine:
 
 ```sh
 # Use a Python 3.14 environment with requirements_test.txt installed.
 TEST_PYTHON=.venv/bin/python
+$TEST_PYTHON tools/check_docstrings.py
 $TEST_PYTHON -m pytest -q --cov=custom_components.vacuula --cov-report=term-missing --cov-report=json
-$TEST_PYTHON -m mypy custom_components/vacuula
+$TEST_PYTHON -m mypy custom_components/vacuula tools
 $TEST_PYTHON -m ruff check .
 $TEST_PYTHON -m ruff format --check .
 ```
@@ -162,6 +165,44 @@ All 25 final 0.1.6 component files matched the tested source by SHA-256.
 Configuration validation passed, and a restart loaded 0.1.6 successfully with
 the D5 connected. The original 0.1.5 installation was backed up outside Git.
 Final telemetry continued to report idle/off dock with no error.
+
+### Follow-up D5 docking test
+
+After the robot was manually placed on its dock, a new authorized test started a
+short cleaning run and called Home Assistant's native **Return to base** action.
+The integration used **Pause → Send to base**, without cancelling the run. The
+robot reported location recovery, then `isDocked: true` within about a minute.
+Two fresh reads confirmed that it stayed docked, at 98% battery and with no error.
+Charging remained false. This verifies return to base during an active run; the
+cancelled-run case was not exercised.
+
+## Complete docstrings and enforcement, 0.1.7
+
+Every Python module, class, function and method has a descriptive docstring,
+including test fixtures, constructors, private helpers and nested protocol
+callbacks. All 52 pre-existing Python files have identical executable ASTs after
+removing docstrings; integration and test behavior is unchanged.
+
+`python tools/check_docstrings.py` audits source without importing it and requires
+**100%** presence coverage. It reports every missing definition with its file and
+line, rejects empty docstrings, and fails on unreadable or invalid source and
+symbolic links. Only named generated, cache, virtual-environment and
+version-control directories are excluded. New source directories are included
+automatically. Descriptive accuracy still requires review.
+
+The audit runs in pytest and before dependency installation in GitHub checks.
+Regression tests cover missing module, class, constructor, property, async-method
+and nested-callback documentation, whitespace-only strings, new source paths,
+generated files, syntax errors, empty/missing roots and linked source. GitHub
+checks also run lint, formatting, strict typing, the complete test suite and
+Hassfest, with actions pinned to reviewed commit IDs. Actionlint validates the
+workflow locally.
+
+All 25 installed 0.1.7 component files matched the validated source by SHA-256.
+Home Assistant configuration validation passed before and after copying. A restart
+loaded the existing Vacuula entry with runtime version 0.1.7, a healthy coordinator
+and the D5 connected and docked without an error. The previous 0.1.6 installation
+was backed up outside the repository.
 
 ## Quality target
 

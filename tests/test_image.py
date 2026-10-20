@@ -17,6 +17,7 @@ from custom_components.vacuula.image import (
 
 
 def test_render():
+    """Decode run-length map pixels into a PNG with the expected dimensions."""
     png = render_map({"width": 3, "height": 2, "rle": [[0, 2], [1, 2], [255, 2]]})
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
     from io import BytesIO
@@ -51,11 +52,13 @@ def test_render():
     ],
 )
 def test_bad_maps(payload):
+    """Reject invalid dimensions and malformed or inconsistent map run lengths."""
     with pytest.raises(ValueError):
         render_map(payload)
 
 
 async def test_image_entity(hass):
+    """Cache map images, handle failed reads and discover new maps only once."""
     entry = MockConfigEntry(domain=DOMAIN, data={})
     entry.add_to_hass(hass)
     client = MagicMock()

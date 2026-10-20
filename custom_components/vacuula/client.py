@@ -24,6 +24,7 @@ class VacuulaError(Exception):
     """A protocol error containing only safe, locally generated text."""
 
     def __init__(self, message: str, *, status: int | None = None) -> None:
+        """Keep a safe error message and optional HTTP or robot status code."""
         super().__init__(message)
         self.status = status
 
@@ -45,10 +46,12 @@ class UnsupportedCommand(CommandError):
 
 
 def _nonfinite(value: str) -> None:
+    """Reject JSON NaN and infinity literals instead of accepting invalid numbers."""
     raise ValueError("Non-finite JSON number")
 
 
 def _finite_float(value: str) -> float:
+    """Decode a JSON float, rejecting exponents that overflow to infinity."""
     result = float(value)
     if not math.isfinite(result):
         raise ValueError("Non-finite JSON number")
@@ -56,6 +59,7 @@ def _finite_float(value: str) -> float:
 
 
 def _decode_json(raw: bytes) -> Any:
+    """Decode UTF-8 JSON with finite numbers and safe protocol errors."""
     try:
         return json.loads(
             raw.decode("utf-8-sig"),
@@ -67,18 +71,21 @@ def _decode_json(raw: bytes) -> Any:
 
 
 def _object(value: Any) -> dict[str, Any]:
+    """Require a JSON object before exposing a server response to callers."""
     if not isinstance(value, dict):
         raise VacuulaError("Expected a JSON object")
     return value
 
 
 def _objects(value: Any) -> list[dict[str, Any]]:
+    """Require a list containing only JSON objects."""
     if not isinstance(value, list) or any(not isinstance(v, dict) for v in value):
         raise VacuulaError("Expected a list of JSON objects")
     return value
 
 
 def _robots(value: Any) -> dict[str, dict[str, Any]]:
+    """Require robot metadata objects keyed by their server identifiers."""
     result = _object(value)
     if any(not isinstance(v, dict) for v in result.values()):
         raise VacuulaError("Invalid robot list")
@@ -103,6 +110,7 @@ class _SSEParser:
     """Parse bounded SSE frames split across arbitrary network chunks."""
 
     def __init__(self) -> None:
+        """Initialize the partial-line buffer and state for the first SSE frame."""
         self.buffer = bytearray()
         self.size = 0
         self.event = "message"
@@ -110,6 +118,7 @@ class _SSEParser:
         self.first_line = True
 
     def feed(self, chunk: bytes) -> list[tuple[str, bytes]]:
+        """Return complete SSE frames while retaining bounded partial lines."""
         self.buffer.extend(chunk)
         frames: list[tuple[str, bytes]] = []
         while self.buffer:
@@ -155,6 +164,7 @@ class VacuulaClient:
     """Use an externally managed aiohttp session; never retry robot commands."""
 
     def __init__(self, session: aiohttp.ClientSession, base_url: str) -> None:
+        """Validate a credential-free HTTP origin and retain the shared session."""
         parts = urlsplit(base_url)
         if (
             parts.scheme not in ("http", "https")
@@ -173,11 +183,13 @@ class VacuulaClient:
         # Vacuula matches raw paths without decoding their identifiers. Gen3
         # map/run IDs contain timestamp colons; retain those URI-safe characters
         # while still escaping path, query and fragment delimiters.
+        """Build an API URL while preserving timestamp colons in raw server paths."""
         path = "/".join(quote(segment, safe=":") for segment in segments)
         return URL(f"{self.base_url}/api/{path}", encoded=True)
 
     @staticmethod
     async def _read(response: aiohttp.ClientResponse) -> bytes:
+        """Read a response incrementally, rejecting bodies larger than JSON_LIMIT."""
         if response.content_length is not None and response.content_length > JSON_LIMIT:
             raise VacuulaError("Response exceeds size limit")
         content = bytearray()
@@ -189,6 +201,7 @@ class VacuulaClient:
 
     @staticmethod
     def _raise_status(status: int, *, command: bool = False) -> None:
+        """Map HTTP failures to authentication, connectivity or command errors."""
         if status in (401, 403):
             raise InvalidAuth("Authentication rejected", status=status)
         if 300 <= status < 400:
@@ -209,6 +222,11 @@ class VacuulaClient:
         allow_ok: bool = False,
         timeout: aiohttp.ClientTimeout = REQUEST_TIMEOUT,
     ) -> Any:
+        """Execute one bounded request and validate status and response encoding.
+
+        Do not follow redirects or retry commands. Accept a plain OK response only
+        when the endpoint explicitly permits it.
+        """
         try:
             async with self._session.request(
                 method,
@@ -236,6 +254,7 @@ class VacuulaClient:
 
     @staticmethod
     def _check_command(response: dict[str, Any], http_status: int) -> None:
+        """Reject failed Gen3 results and failed or malformed Gen4 status codes."""
         result, code = response.get("result"), response.get("code")
         if result in ("command_not_found", "not_implemented") or code == 501:
             raise UnsupportedCommand(
@@ -250,14 +269,17 @@ class VacuulaClient:
                 raise CommandError("Robot rejected the command", status=code)
 
     async def async_server_info(self) -> dict[str, Any]:
+        """Read the local server metadata as a JSON object."""
         return _object(await self._request("GET", "server"))
 
     async def async_robots(self) -> dict[str, dict[str, Any]]:
+        """Read robot metadata keyed by each server-side serial identifier."""
         return _robots(await self._request("GET", "robots"))
 
     async def async_command(
         self, serial: str, command: dict[str, Any]
     ) -> dict[str, Any]:
+        """Send one Gen3 or Gen4 command and require its success envelope."""
         gen3 = isinstance(command.get("cmd"), str)
         gen4 = isinstance(command.get("ability"), str)
         if gen3 == gen4:
@@ -277,6 +299,7 @@ class VacuulaClient:
         return result
 
     async def async_robot_state(self, serial: str, generation: str) -> dict[str, Any]:
+        """Read and unwrap the state command for the requested robot generation."""
         if generation == "neato.gen3":
             command = {"cmd": "getRobotState"}
         elif generation == "neato.gen4":
@@ -286,28 +309,35 @@ class VacuulaClient:
         return unwrap(await self.async_command(serial, command))
 
     async def async_maps(self, serial: str) -> list[dict[str, Any]]:
+        """Read the map records exposed by the server for one robot."""
         return _objects(await self._request("GET", "robot", serial, "maps"))
 
     async def async_runs(self, serial: str) -> list[dict[str, Any]]:
+        """Read the server-stored cleaning history for one robot."""
         return _objects(await self._request("GET", "robot", serial, "runs"))
 
     async def async_map(self, serial: str, map_id: str) -> dict[str, Any]:
+        """Read one saved map from the robot-scoped server endpoint."""
         return _object(await self._request("GET", "robot", serial, "maps", map_id))
 
     async def async_run(self, serial: str, run_id: str) -> dict[str, Any]:
+        """Read one saved cleaning run from the robot-scoped server endpoint."""
         return _object(await self._request("GET", "robot", serial, "run", run_id))
 
     async def async_map_boundaries(
         self, serial: str, map_id: str
     ) -> list[dict[str, Any]]:
+        """Read the boundary objects stored by the server for a Gen4 map."""
         return _objects(
             await self._request("GET", "robot", serial, "maps", map_id, "boundaries")
         )
 
     async def async_boundaries(self, serial: str, map_id: str) -> list[dict[str, Any]]:
+        """Expose server-stored map boundaries through the client alias."""
         return await self.async_map_boundaries(serial, map_id)
 
     async def async_update_robot(self, serial: str, name: str) -> None:
+        """Persist the robot name in Vacuula without changing its firmware settings."""
         await self._request(
             "POST", "robot", serial, payload={"name": name}, allow_ok=True
         )
@@ -315,6 +345,7 @@ class VacuulaClient:
     async def async_update_map(
         self, serial: str, map_id: str, name: str, enabled: bool
     ) -> None:
+        """Write the name and enabled flag together for a saved Gen3 map."""
         await self._request(
             "POST",
             "robot",
@@ -328,6 +359,7 @@ class VacuulaClient:
     async def async_map_action(
         self, serial: str, map_id: str, action: str, payload: Any = None
     ) -> Any:
+        """Apply a supported map action, allowing the longer promotion timeout."""
         if action in ("demote", "delete"):
             return await self._request(
                 "DELETE", "robot", serial, "maps", map_id, allow_ok=True
@@ -347,6 +379,7 @@ class VacuulaClient:
         )
 
     async def _events(self, *segments: str) -> AsyncGenerator[tuple[str | None, Any]]:
+        """Yield validated SSE events, announcing connection with a None pair."""
         try:
             async with self._session.request(
                 "GET",
@@ -370,12 +403,14 @@ class VacuulaClient:
     async def async_server_events(
         self,
     ) -> AsyncGenerator[dict[str, dict[str, Any]]]:
+        """Yield robot-list snapshots from the server event stream."""
         async with aclosing(self._events("events")) as stream:
             async for event, value in stream:
                 if event == "robots":
                     yield _robots(value)
 
     async def async_robot_events(self, serial: str) -> AsyncGenerator[dict[str, Any]]:
+        """Yield this robot's events and an initial stream-opened marker."""
         async with aclosing(self._events("robot", serial, "connect")) as stream:
             async for event, value in stream:
                 if event is None:

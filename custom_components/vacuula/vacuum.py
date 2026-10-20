@@ -148,6 +148,7 @@ async def async_setup_entry(
     entry: ConfigEntry[VacuulaCoordinator],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    """Register a native vacuum for each listed robot and discover later arrivals."""
     async_add_robot_entities(
         entry,
         async_add_entities,
@@ -161,10 +162,12 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
     _attr_name = None
 
     def __init__(self, coordinator: VacuulaCoordinator, serial: str) -> None:
+        """Bind native vacuum controls to the robot's stable entity identity."""
         super().__init__(coordinator, serial, "vacuum")
 
     @property
     def supported_features(self) -> VacuumEntityFeature:
+        """Advertise native controls and gate locate and spot cleaning by capability."""
         features = (
             VacuumEntityFeature.STATE
             | VacuumEntityFeature.START
@@ -183,6 +186,7 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
 
     @property
     def activity(self) -> VacuumActivity | None:
+        """Project confirmed robot state and action into Home Assistant activities."""
         state = self.robot.state.get("state")
         action = self.robot.state.get("action")
         if state in (4, "error"):
@@ -218,10 +222,12 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
 
     @property
     def fan_speed(self) -> str:
+        """Return the saved cleaning mode, falling back to the current robot mode."""
         return cleaning_mode(self.coordinator, self.serial)
 
     @property
     def fan_speed_list(self) -> list[str]:
+        """Offer cleaning modes supported by the generation and hardware model."""
         return fan_modes(self.robot)
 
     async def _command(
@@ -231,7 +237,10 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         gen3_flag: str | None = None,
         gen4_flag: str | None = None,
     ) -> None:
+        """Choose the protocol command and recheck firmware readiness under the lock."""
+
         def build_command(robot: RobotData) -> dict[str, Any]:
+            """Reject newly unavailable actions before building their payload."""
             if (
                 gen3_flag is not None
                 and self.command_allowed(gen3_flag, gen4_flag or gen3_flag) is False
@@ -248,6 +257,7 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         await self.coordinator.async_command(self.serial, build_command)
 
     async def async_start(self) -> None:
+        """Resume a paused run or start cleaning with the configured map policy."""
         if self.command_allowed("resume", "resume") is True:
             await self._command("resumeCleaning", "cleaning.resume", "resume")
             return
@@ -259,6 +269,7 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         def build_command(robot: RobotData) -> dict[str, Any]:
             # Another queued control may have started a run while this action
             # waited. Do not send a second start using its previous readiness.
+            """Recheck start readiness and targets after queued map changes."""
             if self.command_allowed("start", "start") is False:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN, translation_key="action_unavailable"
@@ -276,18 +287,23 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         )
 
     async def async_stop(self, **kwargs: Any) -> None:
+        """Cancel the current run when firmware advertises cancellation is allowed."""
         await self._command("stopCleaning", "cleaning.cancel", "stop", "cancel")
 
     async def async_pause(self) -> None:
+        """Pause the current run while preserving the robot's ability to resume it."""
         await self._command("pauseCleaning", "cleaning.pause", "pause")
 
     async def async_return_to_base(self, **kwargs: Any) -> None:
+        """Use the coordinator's serialized pause-then-home sequence."""
         await self.coordinator.async_return_to_base(self.serial)
 
     async def async_locate(self, **kwargs: Any) -> None:
+        """Ask the robot to play its location sound using its protocol command."""
         await self._command("findMe", "utilities.find_me")
 
     async def async_clean_spot(self, **kwargs: Any) -> None:
+        """Start supported Gen3 spot cleaning with saved dimensions and mode."""
         if self.robot.generation != GEN3 or not self.robot.capabilities.get(
             "spotCleaning"
         ):
@@ -300,6 +316,7 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
             )
 
         def build_command(robot: RobotData) -> dict[str, Any]:
+            """Recheck start readiness under the lock before building a spot run."""
             if self.command_allowed("start", "start") is False:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN, translation_key="action_unavailable"
@@ -309,6 +326,7 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         await self.coordinator.async_command(self.serial, build_command)
 
     async def async_set_fan_speed(self, fan_speed: str, **kwargs: Any) -> None:
+        """Save a validated mode for future runs without changing active cleaning."""
         if fan_speed not in self.fan_speed_list:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="invalid_option"

@@ -73,6 +73,7 @@ def async_add_robot_entities(
 
     @callback
     def discover() -> None:
+        """Add entities for listed robots while deduplicating existing unique IDs."""
         entities: list[Entity] = []
         for robot in coordinator.robots.values():
             if not robot.listed:
@@ -164,6 +165,7 @@ class VacuulaEntity(CoordinatorEntity[VacuulaCoordinator]):
     _attr_has_entity_name = True
 
     def __init__(self, coordinator: VacuulaCoordinator, serial: str, key: str) -> None:
+        """Attach coordinator updates and derive a stable ID from the robot serial."""
         super().__init__(coordinator)
         self.serial = serial
         self._attr_unique_id = f"{serial}_{key}"
@@ -175,10 +177,12 @@ class VacuulaEntity(CoordinatorEntity[VacuulaCoordinator]):
 
     @property
     def available(self) -> bool:
+        """Require both a successful coordinator update and a connected robot."""
         return super().available and self.robot.connected
 
     @property
     def device_info(self) -> DeviceInfo:
+        """Group entities under their robot and link to the local Vacuula interface."""
         robot = self.robot
         return DeviceInfo(
             identifiers={(DOMAIN, self.serial)},
@@ -193,6 +197,7 @@ class VacuulaEntity(CoordinatorEntity[VacuulaCoordinator]):
         )
 
     def detail(self, gen3_key: str, gen4_key: str) -> Any:
+        """Read a details field using the key for this robot generation."""
         return value_at(
             self.robot.state,
             "details",

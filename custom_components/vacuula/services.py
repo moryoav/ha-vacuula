@@ -47,6 +47,7 @@ _GEN3_EVENT = vol.Schema(
 
 
 def _finite(value: float) -> float:
+    """Reject non-finite coordinates before accepting boundary geometry."""
     if not math.isfinite(value):
         raise vol.Invalid("must be a finite number")
     return value
@@ -71,12 +72,14 @@ _BOUNDARY = vol.Schema(
 
 
 def _error(key: str) -> ServiceValidationError:
+    """Build a translated validation error for an invalid action request."""
     return ServiceValidationError(translation_domain=DOMAIN, translation_key=key)
 
 
 def _resolve(
     hass: HomeAssistant, device_id: str
 ) -> tuple[VacuulaCoordinator, RobotData]:
+    """Resolve a device to a robot owned by a loaded Vacuula entry."""
     device = dr.async_get(hass).async_get(device_id)
     if device is None:
         raise _error("unknown_robot")
@@ -93,11 +96,13 @@ def _resolve(
 
 
 def _require_generation(robot: RobotData, generation: str) -> None:
+    """Reject an action that the robot generation does not support."""
     if robot.generation != generation:
         raise _error("unsupported_action")
 
 
 def _cleaning_settings(robot: RobotData, data: dict[str, Any]) -> tuple[str, str]:
+    """Validate cleaning mode and navigation against generation and model support."""
     mode = data.get("mode", "eco")
     navigation = data.get("navigation", "normal")
     if robot.generation == GEN3:
@@ -123,6 +128,11 @@ def _clean_command(
     use_default_map: bool = False,
     require_dock: bool = True,
 ) -> dict[str, Any]:
+    """Build a generation-specific cleaning command from explicit or default targets.
+
+    Require a map for zones and keep whole-home requests separate from mapped
+    cleaning. Saved target selection can optionally require the robot dock.
+    """
     mode, navigation = _cleaning_settings(robot, data)
     map_id = data.get("map_id")
     zones = data.get("zone_ids", [])
@@ -393,6 +403,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
     }
 
     async def handle(call: ServiceCall) -> ServiceResponse:
+        """Dispatch a validated action and return its data or command response.
+
+        Check map ownership before writes and translate protocol failures without
+        exposing raw server response text.
+        """
         coordinator, robot = _resolve(hass, call.data["device_id"])
         data = dict(call.data)
         serial = robot.serial
@@ -427,6 +442,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     ) and data.get("cleaning_type") != "house"
 
                     def update_event(event: dict[str, Any]) -> dict[str, Any]:
+                        """Patch the current event under the map recovery guard."""
                         if (
                             data.get("cleaning_type") in {"auto", "map"}
                             or "map_id" in data
@@ -456,6 +472,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 cleaning_type = data.get("cleaning_type", "auto")
 
                 def create_event(current: RobotData) -> dict[str, Any]:
+                    """Select an event's map and no-go defaults under the lock."""
                     command = _clean_command(
                         current, data, use_default_map=True, require_dock=False
                     )
@@ -573,6 +590,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
 async def _get_data(
     coordinator: VacuulaCoordinator, robot: RobotData, data: dict[str, Any]
 ) -> Any:
+    """Read the requested robot or server resource without unrelated refreshes."""
     resource = data["resource"]
     serial = robot.serial
     if resource == "maps":

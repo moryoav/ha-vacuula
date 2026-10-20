@@ -26,6 +26,7 @@ def advertised_server(address="192.0.2.1", port=8099, name="Vacuula Server"):
 
 @pytest.fixture
 def search():
+    """Replace LAN discovery with an empty, configurable asynchronous search."""
     with patch(
         "custom_components.vacuula.config_flow.async_discover_servers",
         new_callable=AsyncMock,
@@ -36,6 +37,7 @@ def search():
 
 @pytest.fixture
 def api():
+    """Mock a reachable server exposing one newly discovered robot."""
     with patch("custom_components.vacuula.config_flow.VacuulaClient") as client:
         client.return_value.async_server_info = AsyncMock(
             return_value={"version": "1.0.0"}
@@ -52,6 +54,7 @@ def assert_confirmation(result):
 
 
 async def finish_setup(hass, result):
+    """Confirm a pending flow while bypassing integration loading."""
     with patch("custom_components.vacuula.async_setup_entry", return_value=True):
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
         await hass.async_block_till_done()
@@ -59,6 +62,7 @@ async def finish_setup(hass, result):
 
 
 async def test_single_server_uses_advertised_port(hass, search, api):
+    """Preserve the advertised port and hostname alias when confirming one server."""
     search.return_value = [advertised_server()]
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
@@ -78,6 +82,7 @@ async def test_single_server_uses_advertised_port(hass, search, api):
 
 
 async def test_multiple_servers_offer_selection(hass, search, api):
+    """Offer distinct advertisements and configure the selected endpoint."""
     search.return_value = [
         advertised_server(),
         advertised_server("192.0.2.2", 12345, "Other Vacuula"),
@@ -99,6 +104,7 @@ async def test_multiple_servers_offer_selection(hass, search, api):
 
 
 async def test_no_advertisement_falls_back_to_address_form(hass, search, api):
+    """Show manual address entry when LAN discovery finds no servers."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
@@ -110,6 +116,7 @@ async def test_no_advertisement_falls_back_to_address_form(hass, search, api):
 
 
 async def test_duplicate_advertisements_offer_one_confirmation(hass, search, api):
+    """Collapse duplicate endpoint advertisements into one confirmation."""
     search.return_value = [
         advertised_server(port=80),
         advertised_server(port=80, name="Vacuula Alias"),
@@ -123,6 +130,7 @@ async def test_duplicate_advertisements_offer_one_confirmation(hass, search, api
 
 
 async def test_only_configured_server_allows_adding_another_server(hass, search, api):
+    """Offer an address form after excluding the only configured advertisement."""
     MockConfigEntry(
         domain=DOMAIN,
         data={"url": "http://192.0.2.1:8099", "robot_ids": ["EXISTING-robot"]},
@@ -153,6 +161,7 @@ async def test_only_configured_server_allows_adding_another_server(hass, search,
 async def test_unreachable_advertisement_allows_a_working_address(
     hass, search, api, multiple
 ):
+    """Recover from failed advertised endpoints through editable address entry."""
     search.return_value = [advertised_server()]
     if multiple:
         search.return_value.append(advertised_server("192.0.2.2"))
@@ -188,6 +197,7 @@ async def test_unreachable_advertisement_allows_a_working_address(
 async def test_unreachable_advertisement_fallback_preserves_duplicate_prevention(
     hass, search, api
 ):
+    """Reject a configured robot when discovery falls back to a manual address."""
     MockConfigEntry(
         domain=DOMAIN,
         data={"url": "http://192.0.2.3:81", "robot_ids": ["NEW-robot"]},
@@ -211,6 +221,7 @@ async def test_unreachable_advertisement_fallback_preserves_duplicate_prevention
 async def test_discovered_robot_identity_duplicate_offers_another_address(
     hass, search, api
 ):
+    """Update a known robot's endpoint and allow entry of a different server."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={"url": "http://192.0.2.3:81", "robot_ids": ["NEW-robot"]},
@@ -237,6 +248,7 @@ async def test_discovered_robot_identity_duplicate_offers_another_address(
 
 
 async def test_configured_servers_are_excluded_from_selection(hass, search, api):
+    """Confirm the remaining unconfigured server without asking about known ones."""
     MockConfigEntry(
         domain=DOMAIN,
         data={"url": "http://192.0.2.1:8099", "robot_ids": ["EXISTING-robot"]},
@@ -250,6 +262,7 @@ async def test_configured_servers_are_excluded_from_selection(hass, search, api)
 
 
 async def test_malformed_advertisement_falls_back_to_address_form(hass, search, api):
+    """Ignore an invalid advertised port and allow manual setup."""
     search.return_value = [advertised_server(port=0)]
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
@@ -263,6 +276,7 @@ async def test_malformed_advertisement_falls_back_to_address_form(hass, search, 
 async def test_confirmation_connection_failure_allows_address_retry(
     hass, search, api, same_url
 ):
+    """Preserve discovery aliases only when retrying the original endpoint."""
     search.return_value = [advertised_server()]
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
@@ -294,6 +308,7 @@ async def test_confirmation_connection_failure_allows_address_retry(
 async def test_confirmation_rechecks_entries_created_during_setup(
     hass, search, api, same_url
 ):
+    """Reject a duplicate endpoint or robot configured before confirmation finishes."""
     search.return_value = [advertised_server()]
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
@@ -314,6 +329,7 @@ async def test_confirmation_rechecks_entries_created_during_setup(
 async def test_manual_setup_can_complete_with_existing_discovery_flow(
     hass, search, api
 ):
+    """Let manual confirmation finish and retire the competing discovery flow."""
     service = advertised_server()
     discovered = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "zeroconf"}, data=service

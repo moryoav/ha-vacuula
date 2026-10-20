@@ -20,6 +20,7 @@ from custom_components.vacuula.vacuum import (
 
 @pytest.fixture
 def coordinator(hass):
+    """Provide a docked Gen3 robot and execute deferred command builders."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     coordinator = VacuulaCoordinator(hass, entry, MagicMock())
@@ -38,6 +39,7 @@ def coordinator(hass):
     coordinator.dispatched_command = AsyncMock(return_value={})
 
     async def command(serial, payload, *, refresh_maps=False, **kwargs):
+        """Resolve fresh map state and deferred payloads before recording commands."""
         if refresh_maps:
             await coordinator.async_refresh_maps(serial)
         if callable(payload):
@@ -50,6 +52,7 @@ def coordinator(hass):
 
 
 def prepare_robot(coordinator, generation):
+    """Configure a docked robot and one active map for either generation."""
     robot = coordinator.robots["robot"]
     robot.generation = generation
     robot.state = {
@@ -74,6 +77,7 @@ def prepare_robot(coordinator, generation):
 async def test_default_start_refreshes_maps_and_preserves_no_go_lines(
     coordinator, generation, category
 ):
+    """Refresh maps before default cleaning and include no-go protection."""
     robot = prepare_robot(coordinator, generation)
     if category is not None:
         coordinator.cleaning_options["robot"] = {"category": category}
@@ -81,6 +85,7 @@ async def test_default_start_refreshes_maps_and_preserves_no_go_lines(
     robot.maps = []  # A map was created after the last periodic resource refresh.
 
     async def refresh_maps(serial):
+        """Install the newly created active map during the required fresh lookup."""
         assert serial == "robot"
         robot.maps = maps
 
@@ -116,6 +121,7 @@ async def test_default_start_refreshes_maps_and_preserves_no_go_lines(
 async def test_automatic_start_button_falls_back_when_not_docked(
     coordinator, generation, docked
 ):
+    """Allow Automatic to use whole-home cleaning when docking is unconfirmed."""
     robot = prepare_robot(coordinator, generation)
     robot.state["details"] = {"isDocked" if generation == GEN3 else "is_docked": docked}
     button = VacuulaButton(coordinator, "robot", "start")
@@ -136,6 +142,7 @@ async def test_automatic_start_button_falls_back_when_not_docked(
 async def test_explicit_mapped_cleaning_still_requires_dock(
     coordinator, generation, docked
 ):
+    """Reject explicit saved-map cleaning unless the robot is docked."""
     robot = prepare_robot(coordinator, generation)
     robot.state["details"] = {"isDocked" if generation == GEN3 else "is_docked": docked}
     coordinator.cleaning_options["robot"] = {"category": "map"}
@@ -148,6 +155,7 @@ async def test_explicit_mapped_cleaning_still_requires_dock(
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
 @pytest.mark.parametrize("maps", [[], [{"id": "a"}], [{"id": "", "active": True}]])
 def test_explicit_map_requires_valid_active_map(coordinator, generation, maps):
+    """Reject explicit map cleaning without a valid active-map identifier."""
     robot = prepare_robot(coordinator, generation)
     robot.maps = [
         {
@@ -166,6 +174,7 @@ def test_explicit_map_requires_valid_active_map(coordinator, generation, maps):
 async def test_automatic_start_falls_back_without_active_map(
     coordinator, generation, maps_present
 ):
+    """Keep Start available and clean the house when no active map exists."""
     robot = prepare_robot(coordinator, generation)
     robot.maps[0]["enabled" if generation == GEN3 else "promoted"] = False
     if not maps_present:
@@ -188,6 +197,7 @@ async def test_automatic_start_falls_back_without_active_map(
 def test_future_mapped_target_ignores_current_dock_state(
     coordinator, generation, category
 ):
+    """Select protected future cleaning without requiring present docking."""
     robot = prepare_robot(coordinator, generation)
     robot.state["details"] = {}
     target = cleaning_target(robot, category, require_dock=False)
@@ -200,6 +210,7 @@ def test_future_mapped_target_ignores_current_dock_state(
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
 def test_automatic_rejects_corrupt_active_map_id(coordinator, generation):
+    """Reject an active map whose identifier cannot form a valid target."""
     robot = prepare_robot(coordinator, generation)
     robot.maps[0]["id"] = None
     with pytest.raises(ServiceValidationError) as error:
@@ -208,6 +219,7 @@ def test_automatic_rejects_corrupt_active_map_id(coordinator, generation):
 
 
 def test_gen3_matches_dock_across_enabled_maps_without_inventing_selection(coordinator):
+    """Let Gen3 firmware choose its enabled map without sending a map ID."""
     robot = prepare_robot(coordinator, GEN3)
     robot.maps.append({"id": "second-floor", "enabled": True})
     assert start_payload(coordinator, "robot")["params"]["category"] == 4
@@ -216,6 +228,7 @@ def test_gen3_matches_dock_across_enabled_maps_without_inventing_selection(coord
 
 @pytest.mark.parametrize("docked", [False, True])
 def test_gen4_ambiguous_promoted_maps_fail_closed(coordinator, docked):
+    """Refuse Gen4 starts when more than one floorplan is promoted."""
     robot = prepare_robot(coordinator, GEN4)
     robot.state["details"]["is_docked"] = docked
     robot.maps.append({"id": "second-floor", "promoted": True})
@@ -226,6 +239,7 @@ def test_gen4_ambiguous_promoted_maps_fail_closed(coordinator, docked):
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
 async def test_explicit_house_is_deliberate_mapless_cleaning(coordinator, generation):
+    """Honor explicit whole-home cleaning without reading maps or recovery."""
     robot = prepare_robot(coordinator, generation)
     robot.state["details"] = {}
     coordinator.cleaning_options["robot"] = {"category": "house"}
@@ -245,6 +259,7 @@ async def test_explicit_house_is_deliberate_mapless_cleaning(coordinator, genera
 async def test_unresolved_floorplan_upload_does_not_silently_start_without_zones(
     coordinator, category
 ):
+    """Block protected cleaning while a failed upload leaves zones uncertain."""
     robot = prepare_robot(coordinator, GEN4)
     robot.maps[0]["promoted"] = False
     coordinator.cleaning_options["robot"] = {"category": category}
@@ -256,6 +271,7 @@ async def test_unresolved_floorplan_upload_does_not_silently_start_without_zones
 
 
 async def test_explicit_house_remains_available_during_floorplan_recovery(coordinator):
+    """Allow deliberate whole-home cleaning despite pending map recovery."""
     robot = prepare_robot(coordinator, GEN4)
     robot.maps[0]["promoted"] = False
     coordinator.cleaning_options["robot"] = {"category": "house"}
@@ -265,6 +281,7 @@ async def test_explicit_house_remains_available_during_floorplan_recovery(coordi
 
 
 async def test_explicit_spot_preserves_size_and_does_not_use_a_map(coordinator):
+    """Send the chosen Gen3 spot dimensions without map lookup or protection."""
     prepare_robot(coordinator, GEN3)
     coordinator.cleaning_options["robot"] = {
         "category": "spot",
@@ -293,6 +310,7 @@ async def test_explicit_spot_preserves_size_and_does_not_use_a_map(coordinator):
 async def test_resume_preserves_current_run_instead_of_starting_another(
     coordinator, generation
 ):
+    """Route Start to Resume when firmware advertises a resumable run."""
     robot = prepare_robot(coordinator, generation)
     robot.state["availableCommands" if generation == GEN3 else "available_commands"][
         "resume"
@@ -308,6 +326,7 @@ async def test_resume_preserves_current_run_instead_of_starting_another(
 
 
 async def test_failed_map_refresh_does_not_send_a_clean_command(coordinator):
+    """Prevent cleaning when the required fresh map lookup fails."""
     coordinator.async_refresh_maps.side_effect = HomeAssistantError("unavailable")
     with pytest.raises(HomeAssistantError):
         await VacuulaVacuum(coordinator, "robot").async_start()
@@ -318,6 +337,7 @@ async def test_failed_map_refresh_does_not_send_a_clean_command(coordinator):
 async def test_cleaning_type_select_exposes_safe_and_deliberate_choices(
     coordinator, generation
 ):
+    """Expose generation-appropriate cleaning types and persist selection."""
     robot = prepare_robot(coordinator, generation)
     select = next(
         item
@@ -340,6 +360,7 @@ async def test_cleaning_type_select_exposes_safe_and_deliberate_choices(
 async def test_return_home_button_remains_available_while_pause_is_possible(
     coordinator, generation
 ):
+    """Enable Home while a cleaning run can be paused before returning."""
     robot = prepare_robot(coordinator, generation)
     flags = robot.state[
         "availableCommands" if generation == GEN3 else "available_commands"
@@ -380,6 +401,7 @@ async def test_return_home_button_remains_available_while_pause_is_possible(
 def test_busy_maintenance_and_mapping_phases_have_standard_activity(
     coordinator, generation, state, action, activity
 ):
+    """Map cleaning, exploration, standby and docking to HA activity states."""
     robot = prepare_robot(coordinator, generation)
     robot.state.update(state=state, action=action)
     assert VacuulaVacuum(coordinator, "robot").activity == activity
@@ -403,6 +425,7 @@ def test_busy_maintenance_and_mapping_phases_have_standard_activity(
 def test_busy_maintenance_does_not_report_cleaning(
     coordinator, generation, action, docked
 ):
+    """Report idle or docked during maintenance rather than inventing a run."""
     robot = prepare_robot(coordinator, generation)
     robot.state.update(
         state=2 if generation == GEN3 else "busy",
@@ -419,6 +442,7 @@ def test_busy_maintenance_does_not_report_cleaning(
 def test_relocalization_is_cleaning_only_for_an_actual_cleaning_run(
     coordinator, category
 ):
+    """Treat relocalization as cleaning only with a valid cleaning category."""
     robot = prepare_robot(coordinator, GEN3)
     robot.state.update(state=2, action=9, cleaning={"category": category})
     assert VacuulaVacuum(coordinator, "robot").activity == (

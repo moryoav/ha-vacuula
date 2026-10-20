@@ -21,12 +21,14 @@ from custom_components.vacuula.telemetry import source_data
     ],
 )
 def test_missing_or_invalid_errors_are_unknown(key, state):
+    """Keep error and dustbin flags unknown when Gen3 error fields are malformed."""
     robot = RobotData("test", "Neato", GEN3, state=state)
     assert binary_value(robot, next(item for item in BINARY if item.key == key)) is None
 
 
 @pytest.mark.parametrize("errors", ["oops", ["oops"]])
 def test_malformed_gen4_problem(errors):
+    """Keep the problem flag unknown for malformed Gen4 error collections."""
     robot = RobotData("test", "Neato", GEN4, state={"errors": errors})
     assert (
         binary_value(robot, next(item for item in BINARY if item.key == "problem"))
@@ -35,6 +37,7 @@ def test_malformed_gen4_problem(errors):
 
 
 def test_malformed_history_and_error_values():
+    """Reject malformed subrun history and generation-specific error values."""
     robot = RobotData(
         "test",
         "Neato",
@@ -66,6 +69,7 @@ def test_malformed_history_and_error_values():
 
 
 def test_active_subrun_is_not_the_future_last_zone():
+    """Select the active subrun rather than the final not-yet-started zone."""
     active = {"state": "in_progress", "stats": {"area": 12}}
     robot = RobotData(
         "test", "Neato", GEN4, stats={"runs": [active, {"state": "not_started"}]}

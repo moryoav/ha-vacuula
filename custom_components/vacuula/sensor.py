@@ -72,6 +72,8 @@ AUTONOMY_KEYS = (
 
 @dataclass(frozen=True, kw_only=True)
 class VacuulaSensorDescription(SensorEntityDescription):
+    """Describe a scalar measurement, its source and generation-specific decoding."""
+
     source: str = "state"
     gen3_path: tuple[str, ...] = ()
     gen4_path: tuple[str, ...] = ()
@@ -332,6 +334,7 @@ def parse_timestamp(value: Any) -> datetime | None:
 
 
 def _text(value: Any) -> str | None:
+    """Accept string telemetry and cap it at Home Assistant's 255-character limit."""
     return value[:255] if isinstance(value, str) else None
 
 
@@ -341,6 +344,7 @@ def latest_run(robot: RobotData) -> dict[str, Any] | None:
 
 
 def last_value(robot: RobotData, kind: str) -> Any:
+    """Derive a latest-run metric, preserving unknown or inconsistent values as None."""
     latest = latest_run(robot)
     if latest is None:
         return None
@@ -409,6 +413,7 @@ def last_value(robot: RobotData, kind: str) -> Any:
 
 
 def sensor_value(robot: RobotData, desc: VacuulaSensorDescription) -> Any:
+    """Decode a described scalar, enum or history metric without inventing telemetry."""
     kind = desc.kind
     if kind.startswith("last_"):
         return last_value(robot, kind)
@@ -498,6 +503,7 @@ def scalar_stats(
 def create_entities(
     coordinator: VacuulaCoordinator, robot: RobotData
 ) -> list[VacuulaSensor]:
+    """Build known measurements and disabled diagnostics for extra scalars."""
     descriptions = [
         desc for desc in DESCRIPTIONS if sensor_value(robot, desc) is not None
     ]
@@ -531,10 +537,13 @@ async def async_setup_entry(
     entry: ConfigEntry[VacuulaCoordinator],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    """Register scalar sensors and discover new telemetry during later updates."""
     async_add_robot_entities(entry, async_add_entities, create_entities)
 
 
 class VacuulaSensor(VacuulaEntity, SensorEntity):
+    """Expose a validated measurement or diagnostic from cached robot telemetry."""
+
     entity_description: VacuulaSensorDescription
 
     def __init__(
@@ -543,13 +552,16 @@ class VacuulaSensor(VacuulaEntity, SensorEntity):
         serial: str,
         description: VacuulaSensorDescription,
     ) -> None:
+        """Bind the measurement to its robot and decoding description."""
         super().__init__(coordinator, serial, description.key)
         self.entity_description = description
 
     @property
     def native_value(self) -> Any:
+        """Decode the current cached value using this sensor's description."""
         return sensor_value(self.robot, self.entity_description)
 
     @property
     def available(self) -> bool:
+        """Require a connected robot and a valid decoded measurement."""
         return super().available and self.native_value is not None

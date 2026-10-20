@@ -408,11 +408,20 @@ Run checks in an environment with Python 3.14 and the pinned Home Assistant test
 dependencies:
 
 ```sh
+python tools/check_docstrings.py
 python -m pytest --cov=custom_components.vacuula --cov-report=term-missing
 python -m ruff check .
 python -m ruff format --check .
-python -m mypy custom_components/vacuula
+python -m mypy custom_components/vacuula tools
 ```
+
+Docstring coverage is required to stay at **100%** across integration code,
+tests, tools and the smoke script. The AST audit includes modules, classes,
+constructors, private methods and nested functions. It rejects missing or empty
+docstrings without importing the code. Only generated files, caches, virtual
+environments and version-control directories are excluded; symbolic links fail
+the audit rather than silently skipping source. The same requirement runs in
+pytest and GitHub checks. Descriptions still need review for meaning and accuracy.
 
 See [local validation results](docs/local-validation.md) and
 [the quality assessment](docs/quality-scale.md) for outstanding release

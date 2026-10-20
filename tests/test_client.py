@@ -43,6 +43,7 @@ def make_client(
     response.content = MagicMock()
 
     async def iterate(_size):
+        """Yield the configured byte fragments as a mocked HTTP response body."""
         for chunk in chunks if chunks is not None else [raw]:
             yield chunk
 
@@ -70,6 +71,7 @@ def make_client(
     ],
 )
 async def test_get_resources(method, args, payload, path):
+    """Use the expected GET path, bounded timeout and no redirects for reads."""
     client, session, response = make_client(payload)
     assert await getattr(client, method)(*args) == payload
     call = session.request.call_args
@@ -81,6 +83,7 @@ async def test_get_resources(method, args, payload, path):
 
 
 async def test_encode_identifiers_as_single_path_segments():
+    """Escape path delimiters inside robot and map identifiers."""
     client, session, _ = make_client({})
     await client.async_map("robot /?#%", "map/?#")
     assert session.request.call_args.args[1].raw_path == (
@@ -95,6 +98,7 @@ async def test_timestamp_ids_survive_the_actual_http_raw_path():
     paths = []
 
     async def handle(request):
+        """Capture raw request paths and serve the app's JSON or plain OK reply."""
         paths.append(request.raw_path)
         assert request.query_string == ""
         if request.method == "GET":
@@ -143,6 +147,7 @@ async def test_map_promotion_allows_the_server_acknowledgement_window(action):
     ],
 )
 def test_reject_unsafe_base_urls(url):
+    """Reject credentials, unsupported schemes and non-server URL components."""
     with pytest.raises(ValueError, match="server URL"):
         VacuulaClient(MagicMock(), url)
 
@@ -158,6 +163,7 @@ def test_reject_unsafe_base_urls(url):
     ],
 )
 async def test_command_returns_full_envelope(payload, command):
+    """Send each generation's command unchanged and retain its reply envelope."""
     client, session, _ = make_client(payload)
     assert await client.async_command("robot", command) == payload
     assert session.request.call_args.kwargs["json"] == command
@@ -176,6 +182,7 @@ async def test_command_returns_full_envelope(payload, command):
     ],
 )
 async def test_command_rejection(payload, status, error):
+    """Classify rejected commands without exposing the private response body."""
     client, session, _ = make_client(payload, status=status)
     with pytest.raises(error) as caught:
         await client.async_command("robot", {"cmd": "findMe"})
@@ -195,6 +202,7 @@ async def test_command_rejection(payload, status, error):
     ],
 )
 async def test_command_requires_explicit_success(payload, command):
+    """Reject malformed or ambiguous command acknowledgements."""
     client, _, _ = make_client(payload)
     with pytest.raises(VacuulaError):
         await client.async_command("robot", command)
@@ -202,6 +210,7 @@ async def test_command_requires_explicit_success(payload, command):
 
 @pytest.mark.parametrize("command", [{}, {"cmd": "x", "ability": "y"}])
 async def test_invalid_command_does_not_send(command):
+    """Reject missing or mixed command selectors before opening a request."""
     client, session, _ = make_client()
     with pytest.raises(ValueError):
         await client.async_command("robot", command)
@@ -220,6 +229,7 @@ async def test_invalid_command_does_not_send(command):
     ],
 )
 async def test_safe_http_errors(status, error):
+    """Classify HTTP failures and hide response bodies without following redirects."""
     client, session, _ = make_client(raw=b"PRIVATE_RESPONSE", status=status)
     with pytest.raises(error) as caught:
         await client.async_server_info()
@@ -237,6 +247,7 @@ async def test_safe_http_errors(status, error):
     ],
 )
 async def test_transport_failure_is_safe_and_not_retried(exception):
+    """Wrap network failures without leaking URLs or retrying commands."""
     client, session, response = make_client()
     response.__aenter__.side_effect = exception
     with pytest.raises(CannotConnect) as caught:
@@ -247,12 +258,14 @@ async def test_transport_failure_is_safe_and_not_retried(exception):
 
 @pytest.mark.parametrize("raw", [b"no json", b"\xff", b'{"number": NaN}', b"["])
 async def test_invalid_json(raw):
+    """Reject malformed, invalid UTF-8 and nonstandard numeric JSON bodies."""
     client, _, _ = make_client(raw=raw)
     with pytest.raises(VacuulaError, match="Invalid JSON"):
         await client.async_server_info()
 
 
 async def test_json_limit_applies_with_and_without_content_length(monkeypatch):
+    """Enforce the response limit using both headers and streamed byte counts."""
     monkeypatch.setattr("custom_components.vacuula.client.JSON_LIMIT", 8)
     for content_length in (20, None):
         client, _, _ = make_client(
@@ -272,6 +285,7 @@ async def test_json_limit_applies_with_and_without_content_length(monkeypatch):
     ],
 )
 async def test_resource_shapes(method, payload):
+    """Reject JSON values that do not match the requested resource shape."""
     client, _, _ = make_client(payload)
     with pytest.raises(VacuulaError):
         await getattr(client, method)(
@@ -280,6 +294,7 @@ async def test_resource_shapes(method, payload):
 
 
 async def test_mutations_accept_server_unquoted_ok():
+    """Accept the server's plain OK mutation replies and verify exact payloads."""
     client, session, _ = make_client(raw=b"OK")
     await client.async_update_robot("robot", "Kitchen")
     assert session.request.call_args.kwargs["json"] == {"name": "Kitchen"}
@@ -310,10 +325,12 @@ async def test_mutations_accept_server_unquoted_ok():
     ],
 )
 def test_unwrap_preserves_telemetry(payload, expected):
+    """Extract generation-specific data without losing top-level Gen3 telemetry."""
     assert unwrap(payload) == expected
 
 
 async def test_sse_fragmented_crlf_multiline_named_and_keepalive():
+    """Parse fragmented named SSE frames with CRLF, BOM and keepalive comments."""
     chunks = [
         b"\xef\xbb\xbf: keepalive\r",
         b'\n\r\nevent: robots\r\ndata: {\r\ndata: "robot": {"connected": true}}\r',
@@ -330,6 +347,7 @@ async def test_sse_fragmented_crlf_multiline_named_and_keepalive():
 
 
 async def test_robot_stream_opened_before_any_content_read():
+    """Announce stream establishment before attempting to consume event bytes."""
     raw = b'data: {"serial":"robot","data":{}}\n\n'
     client, _, response = make_client(
         raw=raw, headers={"Content-Type": "text/event-stream"}
@@ -342,6 +360,7 @@ async def test_robot_stream_opened_before_any_content_read():
 
 
 async def test_sse_rejects_wrong_robot():
+    """Reject robot events whose serial differs from the requested stream."""
     client, _, _ = make_client(
         raw=b'data: {"serial":"other"}\n\n',
         headers={"Content-Type": "text/event-stream"},
@@ -354,6 +373,7 @@ async def test_sse_rejects_wrong_robot():
 
 @pytest.mark.parametrize("raw", [b"data: invalid\n\n", b"data: []\n\n"])
 async def test_sse_malformed_robot_events(raw):
+    """Reject invalid JSON and non-object payloads in robot event frames."""
     client, _, _ = make_client(raw=raw, headers={"Content-Type": "text/event-stream"})
     stream = client.async_robot_events("robot")
     await anext(stream)
@@ -362,12 +382,14 @@ async def test_sse_malformed_robot_events(raw):
 
 
 async def test_sse_wrong_content_type():
+    """Reject an HTTP response that is not an event stream."""
     client, _, _ = make_client()
     with pytest.raises(VacuulaError, match="event stream"):
         await anext(client.async_server_events())
 
 
 async def test_sse_incomplete_frame_is_discarded():
+    """Ignore a final event that lacks the blank line completing its frame."""
     client, _, _ = make_client(
         raw=b"event: robots\ndata: {}\n", headers={"Content-Type": "text/event-stream"}
     )
@@ -375,6 +397,7 @@ async def test_sse_incomplete_frame_is_discarded():
 
 
 def test_sse_size_limit_accumulates_multiline_frames(monkeypatch):
+    """Bound both multiline frame accumulation and unterminated line buffering."""
     monkeypatch.setattr("custom_components.vacuula.client.SSE_LIMIT", 20)
     parser = _SSEParser()
     assert parser.feed(b"data: 12345\n") == []

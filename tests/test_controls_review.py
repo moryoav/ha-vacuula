@@ -18,6 +18,7 @@ from custom_components.vacuula.vacuum import VacuulaVacuum
 
 @pytest.fixture
 def coordinator(hass):
+    """Provide a connected, docked Gen4 robot with mocked protocol replies."""
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     client = MagicMock(spec=VacuulaClient)
@@ -47,6 +48,7 @@ async def test_start_never_uses_a_target_from_before_a_queued_promotion(coordina
     starts = []
 
     async def maps(serial):
+        """Hold the first map read while returning snapshots of promotion state."""
         nonlocal reads
         reads += 1
         if reads == 1:
@@ -55,11 +57,13 @@ async def test_start_never_uses_a_target_from_before_a_queued_promotion(coordina
         return [deepcopy(floor_map)]
 
     async def promote(serial, map_id, action, payload):
+        """Mark the simulated floorplan promoted when its upload command executes."""
         assert action == "promote"
         floor_map["promoted"] = True
         return {}
 
     async def command(serial, payload):
+        """Record starts alongside actual promotion state at command dispatch."""
         if payload.get("ability") == "cleaning.start":
             starts.append((floor_map["promoted"], deepcopy(payload)))
         return {"code": 200, "body": coordinator.robots["robot"].state}
@@ -93,6 +97,7 @@ async def test_second_queued_start_respects_the_first_start_readback(coordinator
     starts = []
 
     async def maps(serial):
+        """Pause the first target lookup so a second Start can queue behind it."""
         nonlocal reads
         reads += 1
         if reads == 1:
@@ -101,6 +106,7 @@ async def test_second_queued_start_respects_the_first_start_readback(coordinator
         return []
 
     async def command(serial, payload):
+        """Make the first Start publish busy state with further starts disabled."""
         if payload.get("ability") == "cleaning.start":
             starts.append(deepcopy(payload))
             coordinator.robots[serial].state = {
@@ -142,7 +148,10 @@ async def test_command_queued_before_disconnect_never_reaches_the_robot(coordina
 
 
 async def test_disconnect_during_map_read_does_not_send_a_clean_command(coordinator):
+    """Recheck connectivity after target lookup before dispatching cleaning."""
+
     async def maps(serial):
+        """Simulate the robot disconnecting while its map list is fetched."""
         coordinator.robots[serial].connected = False
         return []
 
@@ -156,6 +165,7 @@ async def test_disconnect_during_map_read_does_not_send_a_clean_command(coordina
 @pytest.mark.parametrize("action", ["pause", "stop", "resume"])
 @pytest.mark.parametrize("platform", ["vacuum", "button"])
 async def test_queued_native_controls_recheck_readiness(coordinator, action, platform):
+    """Reject queued vacuum and button actions whose readiness flag changed."""
     robot = coordinator.robots["robot"]
     flag = "cancel" if action == "stop" else action
     robot.state["available_commands"][flag] = True
@@ -180,6 +190,7 @@ async def test_queued_native_controls_recheck_readiness(coordinator, action, pla
 
 
 async def test_queued_return_home_rechecks_connection(coordinator):
+    """Reject a queued Home command if the robot disconnected while waiting."""
     coordinator.robots["robot"].state["available_commands"].update(
         {"pause": False, "return_to_base": True}
     )
@@ -197,6 +208,7 @@ async def test_queued_return_home_rechecks_connection(coordinator):
 
 @pytest.mark.parametrize("action", ["spot", "explore"])
 async def test_queued_mapping_or_spot_control_rechecks_readiness(coordinator, action):
+    """Recheck Start readiness before queued Gen3 exploration or spot cleaning."""
     robot = coordinator.robots["robot"]
     robot.generation = GEN3
     robot.capabilities = {"spotCleaning": "basic-1", "maps": "advanced-1"}

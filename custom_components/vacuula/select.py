@@ -21,12 +21,14 @@ async def async_setup_entry(
     entry: ConfigEntry[VacuulaCoordinator],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    """Register cleaning defaults and any advertised robot language selector."""
     async_add_robot_entities(entry, async_add_entities, create_entities)
 
 
 def create_entities(
     coordinator: VacuulaCoordinator, robot: RobotData
 ) -> list[VacuulaSelect]:
+    """Build local cleaning selectors plus a supported Gen4 language control."""
     keys = ["cleaning_mode", "navigation_mode", "cleaning_category"]
     if robot.generation != GEN3 and robot.preferences.get("available_languages"):
         keys.append("robot_language")
@@ -34,15 +36,19 @@ def create_entities(
 
 
 class VacuulaSelect(VacuulaEntity, SelectEntity):
+    """Select future cleaning defaults or the robot language from valid choices."""
+
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: VacuulaCoordinator, serial: str, key: str) -> None:
+        """Bind the selector to a robot and its translated setting name."""
         super().__init__(coordinator, serial, key)
         self.key = key
         self._attr_translation_key = key
 
     @property
     def available(self) -> bool:
+        """Allow offline default edits; require connection for language writes."""
         if self.key == "robot_language":
             return super().available
         # Cleaning defaults are stored in Home Assistant and never sent to the
@@ -51,6 +57,7 @@ class VacuulaSelect(VacuulaEntity, SelectEntity):
 
     @property
     def options(self) -> list[str]:
+        """Return choices supported by the generation and reported capabilities."""
         if self.key == "cleaning_mode":
             return fan_modes(self.robot)
         if self.key == "navigation_mode":
@@ -80,6 +87,7 @@ class VacuulaSelect(VacuulaEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
+        """Read a valid saved default or derive the choice from robot telemetry."""
         defaults = self.coordinator.cleaning_options.get(self.serial, {})
         if self.key == "cleaning_mode":
             return cleaning_mode(self.coordinator, self.serial)
@@ -98,6 +106,7 @@ class VacuulaSelect(VacuulaEntity, SelectEntity):
         return value if isinstance(value, str) and value in self.options else None
 
     async def async_select_option(self, option: str) -> None:
+        """Validate the choice, then persist a default or send a language command."""
         if option not in self.options:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="invalid_option"

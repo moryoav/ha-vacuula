@@ -38,6 +38,7 @@ def action_setup(hass):
 
     async def command(serial, payload, **kwargs):
         # Mirror the coordinator's deferred selection for focused payload tests.
+        """Resolve deferred payloads after the map and recovery checks."""
         if kwargs.get("refresh_maps"):
             await coordinator.async_refresh_maps(serial)
         if kwargs.get("require_map_recovery"):
@@ -53,6 +54,7 @@ def action_setup(hass):
 
 
 async def _call(hass, setup, action, **data):
+    """Call an advanced action for the fixture's registered robot device."""
     return await hass.services.async_call(
         DOMAIN,
         action,
@@ -112,6 +114,7 @@ async def test_get_data_does_not_request_followup_reads(hass, action_setup, reso
 
 
 async def test_gen3_boundary_write_has_no_duplicate_refresh(hass, action_setup):
+    """Send Gen3 boundaries once without redundant service-level refresh requests."""
     coordinator, robot, _ = action_setup
     await _call(hass, action_setup, "set_boundaries", map_id="map1", boundaries=[])
     coordinator.async_command.assert_awaited_once_with(
@@ -141,6 +144,7 @@ async def test_gen4_boundary_write_uses_atomic_save_and_promote(hass, action_set
 async def test_gen4_boundary_failure_is_reported_without_success_refresh(
     hass, action_setup
 ):
+    """Propagate a failed Gen4 boundary transaction without a success refresh."""
     coordinator, robot, _ = action_setup
     robot.generation = GEN4
     coordinator.async_set_map_boundaries.side_effect = CannotConnect("rejected")
@@ -155,6 +159,7 @@ async def test_clean_auto_reads_maps_before_using_saved_map(hass, action_setup):
     robot.state = {"details": {"isDocked": True}}
 
     async def get_maps(serial):
+        """Expose an enabled saved map only when the fresh map read occurs."""
         robot.maps = [{"id": "2026-10-19T10:00:00Z", "enabled": True}]
         robot.capabilities["maps_available"] = True
 
@@ -167,6 +172,7 @@ async def test_clean_auto_reads_maps_before_using_saved_map(hass, action_setup):
 async def test_explicit_house_is_mapless_and_rejects_conflicting_map(
     hass, action_setup
 ):
+    """Allow intentional mapless cleaning and reject a conflicting explicit map."""
     coordinator, robot, _ = action_setup
     robot.maps = [{"id": "map1", "enabled": True}]
     await _call(hass, action_setup, "clean", cleaning_type="house")
@@ -196,6 +202,7 @@ async def test_gen4_auto_clean_uses_promoted_map(hass, action_setup, nogo_enable
 
 
 async def test_clean_requires_map_when_explicitly_selected(hass, action_setup):
+    """Refuse saved-map cleaning when no eligible map can be selected."""
     coordinator = action_setup[0]
     with pytest.raises(ServiceValidationError):
         await _call(hass, action_setup, "clean", cleaning_type="map")
@@ -214,6 +221,7 @@ async def test_gen4_schedule_defaults_to_fresh_promoted_map(
     robot.maps = [{"id": "stale", "promoted": False}]
 
     async def get_maps(serial):
+        """Replace stale cached maps with the currently promoted floorplan."""
         assert serial == robot.serial
         robot.maps = [{"id": "current", "promoted": True}]
 
@@ -258,6 +266,7 @@ async def test_gen4_schedule_defaults_to_fresh_promoted_map(
 async def test_gen4_schedule_without_promoted_map_uses_whole_home(
     hass, action_setup, maps
 ):
+    """Fall back to mapless future cleaning when no floorplan is promoted."""
     coordinator, robot, _ = action_setup
     robot.generation = GEN4
     robot.maps = maps
@@ -277,6 +286,7 @@ async def test_gen4_schedule_without_promoted_map_uses_whole_home(
 async def test_gen4_schedule_explicit_whole_home_ignores_promoted_map(
     hass, action_setup
 ):
+    """Honor an explicit whole-home schedule without map reads or recovery checks."""
     coordinator, robot, _ = action_setup
     robot.generation = GEN4
     robot.maps = [{"id": "map1", "promoted": True}]
@@ -299,6 +309,7 @@ async def test_gen4_schedule_explicit_whole_home_ignores_promoted_map(
 async def test_gen4_schedule_explicit_zone_keeps_target_and_settings(
     hass, action_setup
 ):
+    """Preserve explicit floorplan, zones and cleaning settings for future runs."""
     coordinator, robot, _ = action_setup
     robot.generation = GEN4
     robot.state = {"details": {"is_docked": False}}
@@ -332,6 +343,7 @@ async def test_gen4_schedule_explicit_zone_keeps_target_and_settings(
 async def test_gen4_schedule_invalid_map_selection_does_not_write(
     hass, action_setup, payload
 ):
+    """Reject unavailable or conflicting schedule map selections before dispatch."""
     coordinator, robot, _ = action_setup
     robot.generation = GEN4
     with pytest.raises(ServiceValidationError):
@@ -348,6 +360,7 @@ async def test_gen4_schedule_invalid_map_selection_does_not_write(
 
 
 async def test_gen4_schedule_map_refresh_failure_does_not_write(hass, action_setup):
+    """Do not create an automatic schedule after its prerequisite map refresh fails."""
     coordinator, robot, _ = action_setup
     robot.generation = GEN4
     coordinator.async_refresh_maps.side_effect = HomeAssistantError("unreachable")
@@ -367,6 +380,7 @@ async def test_gen4_schedule_map_refresh_failure_does_not_write(hass, action_set
 async def test_clean_and_schedule_require_known_floorplan_recovery(
     hass, action_setup, action
 ):
+    """Block automatic runs and schedules pending floorplan recovery."""
     coordinator, robot, _ = action_setup
     robot.generation = GEN4
     coordinator.validate_map_recovery.side_effect = ServiceValidationError(
@@ -428,6 +442,7 @@ async def test_returned_gen3_boundary_id_is_preserved_on_schedule_write(
 
 
 async def test_gen3_null_boundary_is_a_whole_home_schedule(hass, action_setup):
+    """Remove a null response boundary from a Gen3 schedule event."""
     coordinator = action_setup[0]
     await _call(
         hass,
@@ -452,6 +467,7 @@ async def test_gen3_null_boundary_is_a_whole_home_schedule(hass, action_setup):
 async def test_gen3_unresolved_or_conflicting_schedule_zones_never_write(
     hass, action_setup, boundary, explicit_id
 ):
+    """Reject unresolved or conflicting zone IDs without partial writes."""
     coordinator = action_setup[0]
     event = {"mode": 1, "day": 0, "startTime": "09:00", "boundary": boundary}
     if explicit_id:
@@ -494,6 +510,7 @@ async def test_queued_clean_and_schedule_recheck_map_recovery_under_lock(
     service_started = asyncio.Event()
 
     async def call_action():
+        """Signal dispatch before queueing the action behind the robot lock."""
         service_started.set()
         return await _call(
             hass, action_setup, action, cleaning_type=cleaning_type, **payload

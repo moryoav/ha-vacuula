@@ -255,6 +255,10 @@ cleaning option. Without `map_id`, `cleaning_type: auto` follows the same safe
 map selection as the vacuum entity. `cleaning_type: map` requires a saved map;
 `cleaning_type: house` explicitly requests mapless cleaning. A `map_id` selects
 a specific map and cannot be combined with `cleaning_type: house`.
+Immediate cleaning with an explicit map or zone requires confirmed docked
+telemetry, as in the Vacuula app. Off-dock or unknown docking reports reject
+that request rather than changing it to mapless cleaning. Future schedule
+events do not require the robot to be docked when the event is saved.
 
 Generation 3 schedule events contain `mode` (`1` eco, `2` turbo), `day` (`0`
 Sunday through `6` Saturday), `startTime` (`HH:MM`), and optional `boundaryId`.

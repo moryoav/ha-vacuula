@@ -3,7 +3,7 @@
 ## 0.1.12
 
 - Preserved newer server events when an older HTTP robot-list reply finishes, preventing stale connection flags, names and removal decisions from clearing map recovery.
-- Confirmed fresh state before advanced cleaning chooses a map. Refused Automatic or mapped starts with an active map and unknown docking status, while preserving the known off-dock fallback and future schedules.
+- Confirmed fresh state before advanced cleaning chooses a map. Required docked telemetry for explicit map or zone commands and refused Automatic fallback with an active map and unknown docking status, while preserving the known off-dock fallback and future schedules.
 - Rejected duplicate boundary IDs before any network request, preventing silent loss of regions during a complete boundary replacement.
 - Preserved Gen3 home tracking when Stop or a new task is rejected, cancelled or loses its response. Applied new-task intent only after acknowledgement and waited for terminal telemetry after Stop.
 - Validated optional language lists and filtered dynamic diagnostic text on every update, preventing malformed choices, crashes and later disclosure of private-looking text.

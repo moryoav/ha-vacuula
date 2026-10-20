@@ -25,6 +25,7 @@ from .client import VacuulaError
 from .const import DOMAIN, GEN3, GEN4
 from .coordinator import VacuulaCoordinator
 from .data import RobotData, event_targets_map, response_data
+from .entity import value_at
 from .vacuum import cleaning_target
 
 _IDENTIFIER = vol.All(
@@ -140,6 +141,16 @@ def _clean_command(
         raise _error("map_required")
     if map_id and data.get("cleaning_type") == "house":
         raise _error("house_with_map")
+    if map_id and require_dock:
+        docked = value_at(
+            robot.state,
+            "details",
+            "isDocked" if robot.generation == GEN3 else "is_docked",
+        )
+        if not isinstance(docked, bool):
+            raise _error("dock_status_unknown")
+        if not docked:
+            raise _error("map_cleaning_requires_dock")
     target = (
         cleaning_target(
             robot, data.get("cleaning_type", "auto"), require_dock=require_dock

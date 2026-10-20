@@ -4,10 +4,10 @@ Integration version: **0.1.12**. Runtime tested: **Home Assistant 2026.10.2**, P
 
 ## Automated checks
 
-- **1,058 tests passed**, including 123 additional cases since the released 0.1.11 suite. These cover server-list races, fresh advanced-cleaning targets, unknown docking, duplicate boundary IDs, rejected-control intent, optional language choices, changing diagnostic text and overall Gen4 cleaning completion, alongside the earlier protocol and recovery regressions.
+- **1,070 tests passed**, including 135 additional cases since the released 0.1.11 suite. These cover server-list races, fresh advanced-cleaning targets, explicit-map and unknown-docking guards, duplicate boundary IDs, rejected-control intent, optional language choices, changing diagnostic text and overall Gen4 cleaning completion, alongside the earlier protocol and recovery regressions.
 - **99.54% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 21 integration and tool modules.
-- **100% docstring coverage: 1,050/1,050 items in 77 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
+- **100% docstring coverage: 1,056/1,056 items in 78 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
 - Actionlint: **passed**, GitHub workflow syntax and expressions validated.
@@ -386,7 +386,12 @@ review passes and failing regressions established these further defects:
   map. Advanced cleaning now reads state under the same lock as target selection.
   Unknown docking is also distinct from an explicit off-dock report: with an
   active map, it cannot silently authorize the Automatic fallback. Future
-  schedules do not depend on present docking.
+  schedules do not depend on present docking. An additional app-source check
+  showed explicit map/zone requests bypassed that dock guard too, although the
+  app offers those controls only when docked. Immediate explicit targets now
+  require confirmed docking instead of forwarding a request the app would not
+  offer or silently replacing it with whole-home cleaning. The physical
+  behavior of that old override was not tested.
 - Duplicate boundary IDs were accepted. The exact Gen4 handler, executed
   unchanged against scratch SQLite data, replaced the same existing region twice
   and returned success with only the final region. Both generations now reject
@@ -407,7 +412,7 @@ review passes and failing regressions established these further defects:
   only for true, `incomplete` for false and unknown for missing or malformed
   flags. Gen3 status is unchanged.
 
-The complete suite passed in 124.45 seconds. Ruff, strict mypy, the repository-wide
+The complete suite passed in 119.57 seconds. Ruff, strict mypy, the repository-wide
 docstring check, Hassfest and workflow validation passed. A fresh live check
 confirmed Vacuula app 1.0.0 and the installed 0.1.11 integration healthy, with the
 D5 idle and docked at 99% and no reported error. The app was not modified. No

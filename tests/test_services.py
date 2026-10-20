@@ -95,6 +95,7 @@ async def test_targets(hass, setup):
 async def test_clean_gen3(hass, setup):
     """Encode Gen3 cleaning options and reject unsupported selections."""
     coordinator = setup[0]
+    setup[1].state = {"details": {"isDocked": True}}
     await call(hass, setup, "clean")
     assert coordinator.command_payloads[-1] == {
         "cmd": "startCleaning",
@@ -130,6 +131,7 @@ async def test_clean_gen4(hass, setup):
     """Encode multi-zone Gen4 runs and gate max mode on a supported serial pattern."""
     coordinator, robot, _, _ = setup
     robot.generation = GEN4
+    robot.state = {"details": {"is_docked": True}}
     await call(
         hass, setup, "clean", map_id="map1", zone_ids=["a", "b"], navigation="gentle"
     )

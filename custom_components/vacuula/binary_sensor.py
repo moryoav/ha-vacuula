@@ -15,7 +15,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import GEN3
 from .coordinator import VacuulaCoordinator
 from .data import RobotData
-from .entity import VacuulaEntity, async_add_robot_entities, value_at
+from .entity import (
+    VacuulaEntity,
+    async_add_robot_entities,
+    gen4_error_codes,
+    value_at,
+)
 from .telemetry import key_and_label, scalars, source_data
 
 PARALLEL_UPDATES = 0
@@ -127,22 +132,14 @@ def binary_value(
     if not robot.state:
         return None
     if key == "problem":
-        if ("error" if robot.generation == GEN3 else "errors") not in robot.state:
-            return None
-        error = (
-            robot.state.get("error")
-            if robot.generation == GEN3
-            else robot.state.get("errors")
-        )
         if robot.generation == GEN3:
+            if "error" not in robot.state:
+                return None
+            error = robot.state.get("error")
             return bool(error) if error is None or isinstance(error, str) else None
-        return (
-            bool(error)
-            if error is None
-            or isinstance(error, list)
-            and all(isinstance(item, dict) for item in error)
-            else None
-        )
+        # Gen4 informational notices (charging, returning to base) are not faults.
+        codes = gen4_error_codes(robot)
+        return None if codes is None else bool(codes)
     if key == "dustbin_missing":
         if "error" not in robot.state:
             return None

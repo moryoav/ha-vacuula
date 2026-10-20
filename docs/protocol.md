@@ -60,8 +60,18 @@ SSE supports LF, CRLF, and CR line endings, comments, a UTF-8 BOM, network chunk
 that divide frames, and multiline `data` fields. Server robot snapshots are
 filtered by the `robots` event name. A robot stream is subscribed before its
 initial state read, avoiding a gap between the read and subscription. Generation
-3 state events use `type: state` or `eventId: 77`. Generation 4 state and error
-messages identify `peer.state` or `robots.error_codes` in `to.service`.
+3 state events use `type: state` or `eventId: 77`. Generation 4 state messages
+identify `peer.state` in `to.service`. Like the app (`AppContext.tsx`), the
+integration reads Generation 4 errors only from `peer.state` and state reads and
+ignores `robots.error_codes` events, which also carry informational notices.
+Error entries with severity `invalid`, labelled "Info" by the app (for example
+`charging_base` or `return_to_base`), are not reported as problems.
+
+A robot's connection follows the server's robot list. A failed or slow robot
+read, such as the server's 504 after its 30-second robot wait, is logged but does
+not mark the robot disconnected. Entity notifications after partial reads do not
+mark the coordinator healthy; only the server poll and the server event stream
+decide whether the server is reachable.
 
 ## Generation command mapping
 
@@ -162,26 +172,39 @@ The server demotes the active floorplan before upload; failure can therefore
 remove active no-go protection. Offline promotion is refused before creating
 a pending marker; active boundary edits are refused before saving boundaries.
 Before an upload, a pending marker records uncertainty across reload/restart.
-Fresh map reads reconcile it with authoritative server status: promoted,
-inactive, removed maps and removed robots clear it. Any failed upload still
-reports an action error. The same demotion routine is used by failed promotion
-and explicit web-app demotion, with no distinguishing field in the read API.
-Known inactive maps therefore follow ordinary Automatic mapless fallback;
-they do not retain an integration-only block.
+The robot firmware may disable schedule events affected by a map change (the
+app's `gen4UpdateBugHint`), so `scheduling.show` is re-read after every
+promotion attempt.
 
-Only failed reads or unknown map status keep the repair notice and recovery
-guard. Notices identify the robot and map ID. Periodic reads, Refresh data and
-subsequent actions recognize app-side repairs without an HA promotion command.
-Reads use the robot lock so an in-progress upload cannot be reconciled against
-stale pre-upload status. No commands are retried or rolled back automatically.
-Explicit house cleaning/schedules, existing robot schedules and outside controls
-remain available. Unreadable status invalidates the stale promoted-map cache.
+The read API has no field that tells a failed upload from a deliberate
+demotion: both leave the floorplan `promoted=False`. After this integration's
+own upload fails, a demoted floorplan therefore keeps the pending marker, a
+Repairs notice naming the robot and map ID, and the block on new Automatic or
+mapped starts and mapped schedule commands, so Automatic does not quietly run
+without the edited no-go zones. Fresh map reads clear it when a floorplan is
+promoted again (here or in the app), another floorplan is active, or the map is
+no longer in use; demotion through `map_action` and robot removal also clear it.
+A demotion made only in the app is indistinguishable from the failure, so the
+notice asks the user to demote with the action instead. Reads use the robot lock
+so an in-progress upload cannot be reconciled against stale pre-upload status.
+No commands are retried or rolled back automatically. Explicit house
+cleaning/schedules, existing robot schedules and outside controls remain
+available. Unreadable status invalidates the stale promoted-map cache.
 
-Generation 3 map-enabled switches use the app's map update endpoint, preserving
-the cached map name. Generation 4 event-enabled switches send `scheduling.update`
-with the complete existing event and only its `enabled` value changed. Both
-discover new records dynamically and read back changes; absent records become
-unavailable. Map metadata can be updated while a robot is disconnected.
+The server lists only floorplans marked for use (`in_maps_list`), and new
+floorplans arrive unmarked. As in the app (`map.tsx`), `promote` requires a
+floorplan in the list, and `unuse` is refused for the promoted floorplan;
+either would otherwise hide the robot's active floorplan from Automatic.
+
+Generation 3 map-enabled switches use the app's map update endpoint, which
+writes the name and the flag together, so they read the current map list under
+the robot lock and send the stored name. Generation 4 event-enabled switches send
+`scheduling.update` with the complete existing event and only its `enabled`
+value changed. Both discover new records dynamically and read back changes; a
+change the server applied is not reported as failed when only the follow-up read
+fails. When a successful read no longer lists a map or event, its entities are
+removed and can return later. Map metadata can be updated while a robot is
+disconnected.
 
 Additional scalar diagnostic entities traverse `state`, `info`, `stats`,
 `active_run`, `last_run`, and `last_subrun`. The latter two select the latest
@@ -216,6 +239,10 @@ including after a timeout, because execution might already have occurred.
 Successful commands trigger a state readback. Map writes first read the map
 under the target robot to check ownership. Action schemas validate identifiers,
 names, generations, settings, and geometry before sending a request. Boundary
+schemas accept what the app stores (empty names, older colour strings, finite
+vertices slightly outside 0–1) so `get_data` output can be written back, and a
+missing Generation 3 `relevancy` is the vertex average, as in the app's
+`calcRelevancy`. Boundary
 and schedule replacement actions can remove existing data; the factory-reset
 action requires the literal boolean `confirm: true` and Generation 4.
 

@@ -135,7 +135,8 @@ async def test_failed_state_confirmation_never_sends_home(setup_robot):
         with pytest.raises(HomeAssistantError) as error:
             await coordinator.async_return_to_base("robot")
     assert error.value.translation_key == "command_failed"
-    assert not robot.connected
+    # The failed read does not mark the robot offline; Vacuula's list decides.
+    assert robot.connected
     assert client.async_command.await_args_list == [
         command_call(names, action) for action in ("pause", "state")
     ]

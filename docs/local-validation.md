@@ -1,11 +1,11 @@
-# Local validation, 19 October 2026
+# Local validation, 20 October 2026
 
-Integration version: **0.1.4**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.5**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
 
 ## Automated checks
 
-- **627 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery and the protocol/state regressions below.
-- **99.61% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.96%**. Configuration flow coverage is **99.29%** and the discovery helper has **100%**.
+- **656 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery and the protocol/state regressions below.
+- **99.63% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.98%**. Configuration flow coverage is **99.31%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 19 modules.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
@@ -107,6 +107,18 @@ All 25 installed 0.1.3 files matched the tested source by SHA-256. Configuration
 All robot writes were tested with mocked transports. No movement, schedule, boundary, preference or reset command was sent to the physical robot. The Vacuula app was not modified.
 
 All 25 installed 0.1.4 files matched the tested source by SHA-256. Home Assistant configuration validation passed before and after copying. After one restart, the existing entry was **loaded**, a real diagnostics download confirmed runtime **0.1.4**, and the D5 remained connected and docked. The previous installation was backed up outside the source repository.
+
+## Review fixes, 0.1.5
+
+- A failed or timed-out robot read (Vacuula's 504) keeps the robot connected and its controls usable on both generations. A failed map read during a server outage keeps entities unavailable, and **Refresh data** reports failed reads.
+- Gen4 notices with severity `invalid`, labelled "Info" by the app, are not reported as problems, and `robots.error_codes` events are ignored, as in the app.
+- A removed robot's device and entities are created again when it returns. A robot the server stops listing keeps its map entities, shown as unavailable, and is not read until it is listed again, including when it returns through a server event before its maps are read.
+- Promotion requires a floorplan marked for use, and `unuse` is refused for the promoted floorplan. After a failed upload the guard and notice stay while the map is demoted, and clear on promotion here or in the app, demotion through `map_action`, or when the map leaves use. The schedule is read again after every promotion attempt.
+- Map switches send the server's current map name. Map, schedule-event and device names follow renames without a reload; event names include their days. Deleted maps and events lose their entities, which return with the record.
+- Boundaries saved by the app (empty names, older colours, points slightly outside the map) are accepted, and a missing Gen3 relevancy is computed as in the app. `update_schedule_event` with Automatic on a mapped event is refused while no floorplan is promoted.
+- The address form defaults to `http://vacuula.local`. Two servers behind one proxy address with different robots get separate entries, and a Zeroconf address update cannot clash with an ignored discovery.
+
+The regression tests for these problems were checked to fail on the 0.1.4 code. All robot writes were tested with mocked transports; no movement, schedule, boundary, preference or reset command was sent to the physical robot. The Vacuula app was not modified.
 
 ## Quality target
 

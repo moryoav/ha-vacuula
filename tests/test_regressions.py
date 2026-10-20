@@ -300,12 +300,12 @@ async def test_server_map_settings_update_and_refresh_while_robot_offline(
     coordinator = resource_coordinator
     coordinator.robots = {"TEST-robot": RobotData("TEST-robot", "Neato", GEN3, False)}
     coordinator.client.async_update_map = AsyncMock()
-    with patch.object(coordinator, "async_refresh_maps", new=AsyncMock()) as refresh:
-        await coordinator.async_update_map("TEST-robot", "floor", "Downstairs", False)
+    await coordinator.async_update_map("TEST-robot", "floor", "Downstairs", False)
     coordinator.client.async_update_map.assert_awaited_once_with(
         "TEST-robot", "floor", "Downstairs", False
     )
-    refresh.assert_awaited_once_with("TEST-robot")
+    # The map list is read back under the same lock, without robot commands.
+    coordinator.client.async_maps.assert_awaited_once_with("TEST-robot")
     coordinator.client.async_command.assert_not_awaited()
 
 

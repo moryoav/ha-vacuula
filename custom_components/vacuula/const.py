@@ -4,7 +4,8 @@ from homeassistant.const import Platform
 
 DOMAIN = "vacuula"
 CONF_URL = "url"
-DEFAULT_URL = "http://vacuula.local:81"
+# Vacuula's own default app port (standalone and Home Assistant app) is 80.
+DEFAULT_URL = "http://vacuula.local"
 GEN3 = "neato.gen3"
 GEN4 = "neato.gen4"
 PLATFORMS = [

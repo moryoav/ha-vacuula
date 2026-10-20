@@ -148,14 +148,22 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ignore_entry_id: str | None = None,
     ) -> config_entries.ConfigEntry | None:
         """Match robot identity or the same endpoint, including legacy hostnames."""
+        candidate_robots = set(robot_ids)
         entries = [
             entry
             for entry in self._async_current_entries()
             if entry.entry_id != ignore_entry_id
+            # Two servers behind one reverse proxy can share an address. Robot
+            # lists that are both known and disjoint mean different servers.
+            and not (
+                candidate_robots
+                and (configured := set(entry.data.get("robot_ids", [])))
+                and not candidate_robots & configured
+            )
         ]
         for entry in entries:
             matching_urls = _shared_aliases(base_url, aliases, entry_aliases(entry))
-            if matching_urls or set(entry.data.get("robot_ids", [])) & set(robot_ids):
+            if matching_urls or set(entry.data.get("robot_ids", [])) & candidate_robots:
                 return entry
         origin = URL(base_url)
         for entry in entries:
@@ -188,7 +196,9 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             **entry.data,
             CONF_URL_ALIASES: sorted(entry_aliases(entry) | aliases),
         }
-        if robot_ids:
+        configured = set(entry.data.get("robot_ids", []))
+        # Never replace another server's robot list with an unrelated one.
+        if robot_ids and (not configured or configured & set(robot_ids)):
             data["robot_ids"] = robot_ids
         if data != entry.data:
             self.hass.config_entries.async_update_entry(entry, data=data)
@@ -300,11 +310,17 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             self._remember_aliases(entry, self._discovered_aliases, robot_ids)
             if address_changed:
-                self.hass.config_entries.async_update_entry(
-                    entry,
-                    unique_id=self._discovered_url,
-                    data={**entry.data, CONF_URL: self._discovered_url},
+                updates: dict[str, Any] = {
+                    "data": {**entry.data, CONF_URL: self._discovered_url}
+                }
+                # An ignored discovery of this address can already hold the
+                # unique ID; keep the entry's old one rather than clash with it.
+                owner = self.hass.config_entries.async_entry_for_domain_unique_id(
+                    DOMAIN, self._discovered_url
                 )
+                if owner is None or owner.entry_id == entry.entry_id:
+                    updates["unique_id"] = self._discovered_url
+                self.hass.config_entries.async_update_entry(entry, **updates)
                 if entry.state in {
                     ConfigEntryState.LOADED,
                     ConfigEntryState.SETUP_RETRY,

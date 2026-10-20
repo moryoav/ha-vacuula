@@ -12,7 +12,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, GEN3
 from .coordinator import VacuulaCoordinator
 from .data import RobotData
-from .entity import VacuulaEntity, async_add_robot_entities, value_at
+from .entity import (
+    VacuulaEntity,
+    async_add_robot_entities,
+    async_remove_stale_entity,
+    set_name_placeholders,
+    value_at,
+)
 
 PARALLEL_UPDATES = 0
 
@@ -136,14 +142,25 @@ class VacuulaMapSwitch(VacuulaEntity, SwitchEntity):
 
     def _update_name(self) -> None:
         floor_map = self.floor_map
-        self._attr_translation_placeholders = {
-            "map_name": str(floor_map.get("name", self.map_id))
-            if floor_map is not None
-            else self.map_id
-        }
+        set_name_placeholders(
+            self,
+            {
+                "map_name": str(floor_map.get("name", self.map_id))
+                if floor_map is not None
+                else self.map_id
+            },
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
+        if (
+            self.robot.listed
+            and self.robot.capabilities.get("maps_available") is True
+            and self.floor_map is None
+        ):
+            # The server's map list was read and no longer has this map.
+            async_remove_stale_entity(self, self.serial)
+            return
         self._update_name()
         super()._handle_coordinator_update()
 
@@ -164,14 +181,12 @@ class VacuulaMapSwitch(VacuulaEntity, SwitchEntity):
         )
 
     async def _set(self, enabled: bool) -> None:
-        floor_map = self.floor_map
-        if floor_map is None or not self.available:
+        if self.floor_map is None or not self.available:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="action_unavailable"
             )
-        await self.coordinator.async_update_map(
-            self.serial, self.map_id, floor_map["name"], enabled
-        )
+        # The coordinator re-reads the map name; the cached one may be stale.
+        await self.coordinator.async_set_map_enabled(self.serial, self.map_id, enabled)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._set(True)
@@ -209,14 +224,26 @@ class VacuulaScheduleEventSwitch(VacuulaEntity, SwitchEntity):
 
     def _update_name(self) -> None:
         event = self.event
-        self._attr_translation_placeholders = {
-            "event_name": str(event.get("time", self.event_id))
-            if event is not None
-            else self.event_id
-        }
+        name = self.event_id
+        if event is not None and isinstance(time := event.get("time"), str):
+            days = event.get("days")
+            # Include the days so events at the same time stay distinguishable.
+            if isinstance(days, list) and all(isinstance(day, str) for day in days):
+                name = f"{', '.join(days)} {time}"
+            else:
+                name = time
+        set_name_placeholders(self, {"event_name": name})
 
     @callback
     def _handle_coordinator_update(self) -> None:
+        if (
+            self.robot.listed
+            and isinstance(self.robot.schedule.get("events"), list)
+            and self.event is None
+        ):
+            # The robot's schedule was read and no longer has this event.
+            async_remove_stale_entity(self, self.serial)
+            return
         self._update_name()
         super()._handle_coordinator_update()
 

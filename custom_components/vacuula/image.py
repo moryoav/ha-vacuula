@@ -17,6 +17,7 @@ from . import VacuulaConfigEntry
 from .client import VacuulaError
 from .const import DOMAIN
 from .coordinator import VacuulaCoordinator
+from .entity import async_remove_stale_entity, set_name_placeholders
 
 PARALLEL_UPDATES = 0
 
@@ -79,17 +80,21 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator = entry.runtime_data
-    known: set[tuple[str, str]] = set()
+    # Shared through the coordinator so removed maps and robots can return.
+    known = coordinator.known_entities.setdefault(__name__, {})
 
     @callback
     def add_maps() -> None:
         entities: list[VacuulaMapImage] = []
         for serial, robot in coordinator.robots.items():
+            if not robot.listed:
+                continue
+            added = known.setdefault(serial, set())
             for floor_map in robot.maps:
                 map_id = str(floor_map.get("id", ""))
-                if not map_id or (serial, map_id) in known:
+                if not map_id or f"{serial}_map_{map_id}" in added:
                     continue
-                known.add((serial, map_id))
+                added.add(f"{serial}_map_{map_id}")
                 entities.append(VacuulaMapImage(coordinator, serial, map_id))
         if entities:
             async_add_entities(entities)
@@ -132,7 +137,7 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
             ),
             "Floor",
         )
-        self._attr_translation_placeholders = {"map_name": name}
+        set_name_placeholders(self, {"map_name": name})
 
     @property
     def available(self) -> bool:
@@ -147,6 +152,15 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
+        robot = self.coordinator.robots[self.serial]
+        if (
+            robot.listed
+            and robot.capabilities.get("maps_available") is True
+            and not any(str(m.get("id")) == self.map_id for m in robot.maps)
+        ):
+            # The server's map list was read and no longer has this map.
+            async_remove_stale_entity(self, self.serial)
+            return
         self._update_map_name()
         if self._image is not None and monotonic() - self._fetched >= 300:
             self._image = None

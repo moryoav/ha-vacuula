@@ -127,6 +127,10 @@ class VacuulaNumber(VacuulaEntity, NumberEntity):
 
     @property
     def available(self) -> bool:
+        if self.entity_description.preference is None:
+            # Spot sizes are defaults stored in Home Assistant; they stay
+            # editable while the robot is offline.
+            return self.coordinator.last_update_success and self.robot.listed
         return super().available and self.native_value is not None
 
     async def async_set_native_value(self, value: float) -> None:

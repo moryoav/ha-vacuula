@@ -95,7 +95,7 @@ update_schedule_event:
     map_id: *map
     cleaning_type:
       name: Cleaning type
-      description: Auto uses the promoted floorplan when available. Map requires one. Whole home removes zones and ignores no-go boundaries. Omit to preserve an existing target. The robot's current dock state does not affect future events.
+      description: Auto uses the promoted floorplan when available; for an existing event that targets a map it is rejected while no floorplan is promoted. Map requires one. Whole home removes zones and ignores no-go boundaries. Omit to preserve an existing target. The robot's current dock state does not affect future events.
       selector:
         select:
           options:
@@ -136,7 +136,7 @@ delete_schedule_event:
         text:
 set_boundaries:
   name: Replace map boundaries
-  description: Replace the complete boundary list on a map. An empty list removes all boundaries. An active Generation 4 floorplan is promoted again to send the changes to the robot. A failed promotion may leave no active floorplan and blocks automatic mapped actions until a successful promote action. Inactive maps stay inactive. Use get_data to read the current boundaries first.
+  description: Replace the complete boundary list on a map. An empty list removes all boundaries. Boundaries read with get_data can be written back unchanged; a missing Generation 3 relevancy is computed from the vertices. An active Generation 4 floorplan is promoted again to send the changes to the robot, and the schedule is re-read because the firmware may disable affected events. A failed promotion may leave no active floorplan; Automatic and mapped actions stay blocked until the floorplan is promoted again or demoted with the map action. Inactive maps stay inactive. Use get_data to read the current boundaries first.
   fields:
     device_id: *device
     map_id:
@@ -177,7 +177,7 @@ update_map:
         boolean:
 map_action:
   name: Manage floorplan
-  description: Promote, include, exclude or demote a Generation 4 map. Demote removes its active floorplan status.
+  description: Promote, include, exclude or demote a Generation 4 map. Demote removes its active floorplan status. As in the Vacuula app, only a map marked with use can be promoted, and the active floorplan must be demoted before unuse.
   fields:
     device_id: *device
     map_id:

@@ -6,7 +6,7 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, GEN3
@@ -102,7 +102,10 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
                 translation_domain=DOMAIN, translation_key="action_unavailable"
             )
         if self.key == "refresh":
-            await self.coordinator.async_refresh_robot(self.serial, full=True)
+            if not await self.coordinator.async_refresh_robot(self.serial, full=True):
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="command_failed"
+                )
         elif self.key == "start":
             await VacuulaVacuum(self.coordinator, self.serial).async_start()
         elif self.key == "clean_spot":

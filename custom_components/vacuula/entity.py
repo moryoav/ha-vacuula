@@ -5,6 +5,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -25,6 +26,29 @@ def value_at(data: dict[str, Any], *path: str) -> Any:
     return value
 
 
+def gen4_error_codes(robot: RobotData) -> list[str] | None:
+    """Return Gen4 error codes, skipping informational notices.
+
+    The robot's errors list also carries status notices such as charging on
+    the base or returning to base. The Vacuula app labels their severity
+    "invalid" as "Info"; they are not problems. None means not reported.
+    """
+    if "errors" not in robot.state:
+        return None
+    errors = robot.state.get("errors")
+    if errors is None:
+        return []
+    if not isinstance(errors, list) or any(
+        not isinstance(item, dict) for item in errors
+    ):
+        return None
+    return [
+        str(item.get("code", ""))
+        for item in errors
+        if item.get("severity") != "invalid"
+    ]
+
+
 def number(value: Any) -> int | float | None:
     """Accept numeric telemetry, excluding booleans and invalid floats."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -42,23 +66,53 @@ def async_add_robot_entities(
 ) -> None:
     """Discover entities again after pushes, including newly supported telemetry."""
     coordinator = entry.runtime_data
-    known: set[str] = set()
+    # Shared through the coordinator per platform module and robot, so a robot
+    # whose device was removed, or a deleted record, can be added again later.
+    known = coordinator.known_entities.setdefault(factory.__module__, {})
 
     @callback
     def discover() -> None:
         entities: list[Entity] = []
         for robot in coordinator.robots.values():
+            if not robot.listed:
+                continue
+            added = known.setdefault(robot.serial, set())
             for entity in factory(coordinator, robot):
                 if (
                     unique_id := entity.unique_id
-                ) is not None and unique_id not in known:
-                    known.add(unique_id)
+                ) is not None and unique_id not in added:
+                    added.add(unique_id)
                     entities.append(entity)
         if entities:
             async_add_entities(entities)
 
     discover()
     entry.async_on_unload(coordinator.async_add_listener(discover))
+
+
+@callback
+def async_remove_stale_entity(
+    entity: CoordinatorEntity[VacuulaCoordinator], serial: str
+) -> None:
+    """Remove an entity whose server record was deleted; it can return later."""
+    known = entity.coordinator.known_entities.get(type(entity).__module__, {})
+    if entity.unique_id is not None:
+        known.get(serial, set()).discard(entity.unique_id)
+    if entity.registry_entry is not None:
+        er.async_get(entity.hass).async_remove(entity.entity_id)
+
+
+def set_name_placeholders(entity: Entity, placeholders: dict[str, str]) -> None:
+    """Update translated name placeholders and drop HA's cached entity name.
+
+    Home Assistant caches Entity.name and only invalidates it when _attr_name
+    changes, so a renamed map or edited event would otherwise keep its old name
+    until the integration is reloaded.
+    """
+    if getattr(entity, "_attr_translation_placeholders", None) == placeholders:
+        return
+    entity._attr_translation_placeholders = placeholders
+    entity.__dict__.pop("name", None)
 
 
 class VacuulaEntity(CoordinatorEntity[VacuulaCoordinator]):

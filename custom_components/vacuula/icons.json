@@ -179,9 +179,6 @@
       "autonomy": {
         "default": "mdi:robot-vacuum"
       },
-      "local_statistic": {
-        "default": "mdi:chart-line"
-      },
       "map_count": {
         "default": "mdi:floor-plan"
       },

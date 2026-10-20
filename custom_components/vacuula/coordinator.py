@@ -12,8 +12,9 @@ from time import monotonic
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -64,6 +65,9 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         self._unsupported: set[tuple[str, str]] = set()
         self._robot_failures: set[str] = set()
         self._remove_poll: Callable[[], None] | None = None
+        # Unique IDs already added, per platform module and robot serial. Kept
+        # here so a removed device or record can be added again when it returns.
+        self.known_entities: dict[str, dict[str, set[str]]] = {}
 
     def _update_capabilities(self, robot: RobotData) -> None:
         if isinstance(services := robot.state.get("availableServices"), dict):
@@ -72,14 +76,48 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
     def _lock(self, serial: str) -> asyncio.Lock:
         return self._locks.setdefault(serial, asyncio.Lock())
 
+    @callback
+    def _async_update_device_name(self, serial: str, name: str) -> None:
+        """Follow a robot renamed in Vacuula; a user-chosen HA name still wins."""
+        registry = dr.async_get(self.hass)
+        if device := registry.async_get_device_by_identifier(
+            (DOMAIN, serial), self.entry.entry_id
+        ):
+            registry.async_update_device(device.id, name=name)
+
+    @callback
+    def async_forget_robot(self, serial: str) -> None:
+        """Forget a removed robot's entities, so they are added if it returns.
+
+        The robot's cached data stays (unlisted) until the server lists it again,
+        so entities that Home Assistant is still removing keep working.
+        """
+        if robot := self.robots.get(serial):
+            robot.listed = False
+            robot.connected = False
+        if task := self._streams.pop(serial, None):
+            task.cancel()
+        self._last_details.pop(serial, None)
+        self._last_resources.pop(serial, None)
+        self._robot_failures.discard(serial)
+        self._unsupported = {item for item in self._unsupported if item[0] != serial}
+        for known in self.known_entities.values():
+            known.pop(serial, None)
+        if serial in self._pending_promotions:
+            self._set_pending_promotion(serial, None)
+
     async def _async_update_data(self) -> dict[str, RobotData]:
         try:
             self.server_info = await self.client.async_server_info()
             snapshot = await self.client.async_robots()
         except VacuulaError as err:
-            raise UpdateFailed("Vacuula server is unavailable") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN, translation_key="server_unavailable"
+            ) from err
         await self._async_snapshot(snapshot)
         for serial, robot in list(self.robots.items()):
+            if not robot.listed:
+                continue
             if robot.connected:
                 await self._async_refresh_robot(serial)
             await self._async_refresh_resources(serial)
@@ -97,8 +135,14 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         for serial, robot in list(self.robots.items()):
             if serial not in snapshot:
                 robot.connected = False
+                robot.listed = False
                 robot.maps = []
                 robot.runs = []
+                # Unknown, not empty: its map entities must not look deleted.
+                # The lists are read again once the server lists the robot.
+                robot.capabilities.pop("maps_available", None)
+                robot.capabilities.pop("runs_available", None)
+                self._last_resources.pop(serial, None)
                 if task := self._streams.pop(serial, None):
                     task.cancel()
         for serial, metadata in snapshot.items():
@@ -111,11 +155,14 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 serial,
                 RobotData(serial, str(metadata.get("name") or "Neato"), generation),
             )
-            robot.name = str(metadata.get("name") or robot.name)
+            if (name := str(metadata.get("name") or robot.name)) != robot.name:
+                robot.name = name
+                self._async_update_device_name(serial, name)
             if map_id := self._pending_promotions.get(serial):
                 self._create_promotion_issue(serial, map_id)
             if label := metadata.get("label_serial"):
                 robot.info["label_serial"] = label
+            robot.listed = True
             robot.connected = metadata.get("connected") is True
             if not robot.connected:
                 if task := self._streams.pop(serial, None):
@@ -210,13 +257,11 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 if isinstance(body := payload.get("data"), dict):
                     state = body
         elif isinstance(target := payload.get("to"), dict):
+            # Like the Vacuula app, read errors only from full peer.state lists.
+            # robots.error_codes events also carry informational notices.
             if target.get("service") == "peer.state":
                 if isinstance(body := payload.get("body"), dict):
                     state = body
-            elif target.get("service") == "robots.error_codes":
-                if isinstance(body := payload.get("body"), dict):
-                    robot.state["errors"] = [body]
-                    self.async_set_updated_data(self.robots)
         if state is not None:
             # Events can contain partial state, so preserve unrelated cached fields.
             for key, value in state.items():
@@ -256,24 +301,26 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 _LOGGER.info("Vacuula robot connection recovered")
                 self._robot_failures.remove(robot.serial)
         except VacuulaError:
-            robot.connected = False
+            # Vacuula's robot list decides whether the robot is connected. A
+            # single slow or failed read (such as the server's 504 timeout)
+            # must not make the robot unavailable and drop its controls.
             if robot.serial not in self._robot_failures:
-                _LOGGER.info("Vacuula robot is unavailable")
+                _LOGGER.info("Vacuula robot is not answering")
                 self._robot_failures.add(robot.serial)
             return False
         return True
 
-    async def _async_refresh_robot(self, serial: str, *, full: bool = False) -> None:
+    async def _async_refresh_robot(self, serial: str, *, full: bool = False) -> bool:
         robot = self.robots[serial]
         async with self._lock(serial):
             if not await self._async_read_state_locked(robot):
-                return
+                return False
             if (
                 not full
                 and serial in self._last_details
                 and monotonic() - self._last_details[serial] < 300
             ):
-                return
+                return True
             if robot.generation == GEN3:
                 queries = {
                     "info": "getGeneralInfo",
@@ -300,40 +347,79 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 ):
                     robot.preferences.update(language)
             self._last_details[serial] = monotonic()
+            return True
 
     async def _async_refresh_resources(
         self, serial: str, *, full: bool = False
-    ) -> None:
+    ) -> bool:
         if (
             not full
             and serial not in self._pending_promotions
             and serial in self._last_resources
             and monotonic() - self._last_resources[serial] < 300
         ):
-            return
+            return True
         robot = self.robots[serial]
+        maps_read = False
         # A map read must not race an in-progress promotion and mistake the
         # previous active map for the outcome of the upload.
         async with self._lock(serial):
             with suppress(VacuulaError):
                 await self._async_read_maps_locked(serial)
+                maps_read = True
         with suppress(VacuulaError):
             robot.runs = await self.client.async_runs(serial)
             robot.capabilities["runs_available"] = True
         self._last_resources[serial] = monotonic()
+        return maps_read
 
-    async def async_refresh_robot(self, serial: str, *, full: bool = False) -> None:
-        """Read the latest state and notify entity listeners."""
+    async def async_refresh_robot(self, serial: str, *, full: bool = False) -> bool:
+        """Read the latest state and saved maps, and notify entity listeners.
+
+        Return whether the reads succeeded. Listeners are notified without
+        marking the coordinator healthy: only the server poll and event stream
+        decide availability, so a failed read during an outage cannot restore it.
+        """
+        state_read = True
         if self.robots[serial].connected:
-            await self._async_refresh_robot(serial, full=full)
-        await self._async_refresh_resources(serial, full=full)
-        self.async_set_updated_data(self.robots)
+            state_read = await self._async_refresh_robot(serial, full=full)
+        resources_read = await self._async_refresh_resources(serial, full=full)
+        self.async_update_listeners()
+        return state_read and resources_read
 
     async def async_map_operation(
         self, serial: str, map_id: str, action: str, payload: Any = None
     ) -> Any:
         """Serialize map operations that can upload data or command the robot."""
         async with self._lock(serial):
+            if action == "promote":
+                self._require_robot_connection(serial)
+            if action in {"promote", "unuse"}:
+                # Match the Vacuula app: only a floorplan marked for use can be
+                # promoted, and the active floorplan cannot be taken out of use.
+                # Vacuula lists only floorplans in use, so either case would hide
+                # the robot's active floorplan and its no-go zones from Automatic.
+                await self._async_read_maps_locked(serial)
+                floor_map = next(
+                    (
+                        item
+                        for item in self.robots[serial].maps
+                        if item.get("id") == map_id
+                    ),
+                    None,
+                )
+                if action == "promote" and floor_map is None:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN, translation_key="map_not_in_use"
+                    )
+                if (
+                    action == "unuse"
+                    and floor_map is not None
+                    and floor_map.get("promoted") is True
+                ):
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN, translation_key="map_unuse_promoted"
+                    )
             if action != "promote":
                 result = await self.client.async_map_action(
                     serial, map_id, action, payload
@@ -344,7 +430,6 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 ):
                     self._set_pending_promotion(serial, None)
                 return result
-            self._require_robot_connection(serial)
             self._set_pending_promotion(serial, map_id)
             try:
                 result = await self.client.async_map_action(
@@ -353,6 +438,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             except VacuulaError as err:
                 with suppress(VacuulaError):
                     await self._async_read_maps_locked(serial)
+                await self._async_read_schedule_locked(serial)
                 raise HomeAssistantError(
                     translation_domain=DOMAIN, translation_key="map_promotion_failed"
                 ) from err
@@ -397,7 +483,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             options={**self.entry.options, "pending_map_promotions": pending},
         )
         self._pending_promotions = pending
-        self.async_set_updated_data(self.robots)
+        self.async_update_listeners()
 
     def validate_map_recovery(self, serial: str) -> None:
         """Require authoritative map status after an uncertain floorplan upload."""
@@ -411,19 +497,20 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         return serial in self._pending_promotions
 
     def _reconcile_map_recovery(self, serial: str) -> None:
-        """Resolve an uncertain upload against an authoritative server map list."""
+        """Clear the upload guard once the server shows a resolved floorplan.
+
+        After this integration's own upload fails, Vacuula reports the demoted
+        floorplan exactly like a deliberate demotion (promoted=False). Keep the
+        guard in that state so Automatic does not quietly clean without no-go
+        zones. Clear it when a floorplan is active again (promoted here or in
+        the Vacuula app) or the uploaded map is no longer in use. Demoting it
+        with the map action also clears it.
+        """
         if (map_id := self._pending_promotions.get(serial)) is None:
             return
         maps = self.robots[serial].maps
         floor_map = next((item for item in maps if item.get("id") == map_id), None)
-        # The server uses the same promoted=False state for failed uploads and
-        # deliberate demotion. Respect its current confirmed state instead of
-        # keeping an integration-only block after the user abandons a map.
-        if (
-            floor_map is None
-            or isinstance(floor_map.get("promoted"), bool)
-            or any(item.get("promoted") is True for item in maps)
-        ):
+        if floor_map is None or any(item.get("promoted") is True for item in maps):
             self._set_pending_promotion(serial, None)
 
     async def _async_read_maps_locked(self, serial: str) -> None:
@@ -438,7 +525,19 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 robot.capabilities["maps_available"] = False
             raise
         finally:
-            self.async_set_updated_data(self.robots)
+            # Notify entities without marking the coordinator healthy: a failed
+            # read during a server outage must not make stale entities available.
+            self.async_update_listeners()
+
+    async def _async_read_schedule_locked(self, serial: str) -> None:
+        """Re-read a Gen4 schedule; the firmware may disable events on map changes."""
+        robot = self.robots[serial]
+        if robot.generation == GEN4 and robot.connected:
+            if (
+                schedule := await self._async_optional(robot, "scheduling.show")
+            ) is not None:
+                robot.schedule = schedule
+                self.async_update_listeners()
 
     async def _async_confirm_promotion_locked(self, serial: str, map_id: str) -> None:
         try:
@@ -447,6 +546,8 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="map_promotion_failed"
             ) from err
+        finally:
+            await self._async_read_schedule_locked(serial)
         if not any(
             item.get("id") == map_id and item.get("promoted") is True
             for item in self.robots[serial].maps
@@ -464,7 +565,11 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             maps = self.robots[serial].maps
             floor_map = next((item for item in maps if item.get("id") == map_id), None)
             if floor_map is None:
-                raise VacuulaError("Map does not belong to the robot")
+                # The map exists (ownership was checked) but is not in use, so
+                # the Vacuula app would not offer it for boundary editing either.
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="map_not_in_use"
+                )
             if floor_map.get("promoted") is True:
                 self._require_robot_connection(serial)
             result = await self.client.async_map_action(
@@ -479,6 +584,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 except VacuulaError as err:
                     with suppress(VacuulaError):
                         await self._async_read_maps_locked(serial)
+                    await self._async_read_schedule_locked(serial)
                     raise HomeAssistantError(
                         translation_domain=DOMAIN,
                         translation_key="map_promotion_failed",
@@ -505,11 +611,48 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         try:
             async with self._lock(serial):
                 await self.client.async_update_map(serial, map_id, name, enabled)
+                # The server applied the change; a failed follow-up read must
+                # not report the action as failed. The next poll catches up.
+                with suppress(VacuulaError):
+                    await self._async_read_maps_locked(serial)
         except VacuulaError as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="command_failed"
             ) from err
-        await self.async_refresh_maps(serial)
+
+    async def async_set_map_enabled(
+        self, serial: str, map_id: str, enabled: bool
+    ) -> None:
+        """Change a Gen3 map's enabled flag, keeping the name stored right now.
+
+        Vacuula writes the name and the flag together, so read the current map
+        list first instead of sending a cached name that could undo a rename
+        made in the Vacuula app.
+        """
+        try:
+            async with self._lock(serial):
+                await self._async_read_maps_locked(serial)
+                floor_map = next(
+                    (
+                        item
+                        for item in self.robots[serial].maps
+                        if item.get("id") == map_id
+                    ),
+                    None,
+                )
+                if floor_map is None or not isinstance(
+                    name := floor_map.get("name"), str
+                ):
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN, translation_key="action_unavailable"
+                    )
+                await self.client.async_update_map(serial, map_id, name, enabled)
+                with suppress(VacuulaError):
+                    await self._async_read_maps_locked(serial)
+        except VacuulaError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="command_failed"
+            ) from err
 
     async def _async_command_readback_locked(
         self, robot: RobotData, command: dict[str, Any]
@@ -586,7 +729,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 raise HomeAssistantError(
                     translation_domain=DOMAIN, translation_key="command_failed"
                 ) from err
-        self.async_set_updated_data(self.robots)
+        self.async_update_listeners()
         return result
 
     async def async_command(
@@ -652,7 +795,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                     translation_domain=DOMAIN, translation_key="command_failed"
                 ) from err
         if refresh:
-            self.async_set_updated_data(self.robots)
+            self.async_update_listeners()
         return result
 
     async def async_return_to_base(self, serial: str) -> None:
@@ -702,7 +845,9 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 raise HomeAssistantError(
                     translation_domain=DOMAIN, translation_key="command_failed"
                 ) from err
-        self.async_set_updated_data(self.robots)
+            finally:
+                # Show a completed pause even when docking was then refused.
+                self.async_update_listeners()
 
     async def async_set_cleaning_option(
         self, serial: str, key: str, value: Any
@@ -719,4 +864,4 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             options={**self.entry.options, "cleaning_options": options},
         )
         self.cleaning_options = deepcopy(options)
-        self.async_set_updated_data(self.robots)
+        self.async_update_listeners()

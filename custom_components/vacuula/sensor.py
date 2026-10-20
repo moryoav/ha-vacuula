@@ -26,7 +26,13 @@ from homeassistant.util import dt as dt_util
 from .const import GEN3
 from .coordinator import VacuulaCoordinator
 from .data import RobotData
-from .entity import VacuulaEntity, async_add_robot_entities, number, value_at
+from .entity import (
+    VacuulaEntity,
+    async_add_robot_entities,
+    gen4_error_codes,
+    number,
+    value_at,
+)
 from .telemetry import key_and_label, latest_record, scalars, source_data
 
 PARALLEL_UPDATES = 0
@@ -110,7 +116,7 @@ DESCRIPTIONS = (
         translation_key="alert",
         entity_category=EntityCategory.DIAGNOSTIC,
         gen3_path=("alert",),
-        kind="text",
+        kind="alert",
     ),
     VacuulaSensorDescription(
         key="active_cleaning_mode",
@@ -418,26 +424,22 @@ def sensor_value(robot: RobotData, desc: VacuulaSensorDescription) -> Any:
     if kind == "schedule_count":
         events = robot.schedule.get("events")
         return len(events) if isinstance(events, list) else None
-    if kind == "error":
+    if kind in ("error", "alert"):
         if robot.generation == GEN3:
-            error = robot.state.get("error")
+            # Gen3 reports one error and one alert; null means none is active.
+            value = robot.state.get(kind)
             return (
-                (error or "none")[:255]
-                if "error" in robot.state and (error is None or isinstance(error, str))
+                (value or "none")[:255]
+                if kind in robot.state and (value is None or isinstance(value, str))
                 else None
             )
-        errors = robot.state.get("errors")
-        if errors is None and "errors" not in robot.state:
+        if kind == "alert":
+            # Gen4 reports alerts inside its errors list, shown by Error.
             return None
-        return (
-            ", ".join(
-                str(item.get("code", "")) for item in errors if isinstance(item, dict)
-            )[:255]
-            if isinstance(errors, list) and errors
-            else "none"
-            if errors is None or errors == []
-            else None
-        )
+        codes = gen4_error_codes(robot)
+        if codes is None:
+            return None
+        return ", ".join(codes)[:255] if codes else "none"
     path = desc.gen3_path if robot.generation == GEN3 else desc.gen4_path
     raw = value_at(source_data(robot, desc.source), *path) if path else None
     if kind in (

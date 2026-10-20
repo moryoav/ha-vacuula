@@ -515,5 +515,9 @@ async def test_dynamic_map_and_schedule_event_switches(hass, loaded):
     coordinator.robots["robot4"].schedule = {"events": []}
     coordinator.async_set_updated_data(coordinator.robots)
     await hass.async_block_till_done()
-    assert hass.states.get(map_entity).state == "unavailable"
-    assert hass.states.get(event_entity).state == "unavailable"
+    # Records deleted on the server remove their switches instead of leaving
+    # them unavailable forever.
+    registry = er.async_get(hass)
+    for entity_id in (map_entity, event_entity):
+        assert hass.states.get(entity_id) is None
+        assert registry.async_get(entity_id) is None

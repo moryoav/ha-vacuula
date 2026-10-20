@@ -70,8 +70,10 @@ async def test_robot_failure_recovery(coordinator, caplog):
     coordinator.client.async_command.side_effect = CannotConnect("offline")
     await coordinator._async_update_data()
     await coordinator._async_update_data()
-    assert not coordinator.robots["TEST-robot"].connected
-    assert caplog.text.count("robot is unavailable") == 1
+    # Vacuula still lists the robot as connected; one failed read (such as its
+    # 504 timeout) must not make the robot and its controls unavailable.
+    assert coordinator.robots["TEST-robot"].connected
+    assert caplog.text.count("robot is not answering") == 1
     coordinator.client.async_command.side_effect = None
     await coordinator._async_update_data()
     assert coordinator.robots["TEST-robot"].connected
@@ -166,11 +168,13 @@ async def test_push_events(coordinator):
         {"data": {"to": {"service": "peer.state"}, "body": {"state": "idle"}}},
     )
     assert robot.state["state"] == "idle"
+    # Like the Vacuula app, error-code events are ignored: they also carry
+    # informational notices, and peer.state carries the full errors list.
     coordinator._handle_event(
         "TEST-robot",
         {"data": {"to": {"service": "robots.error_codes"}, "body": {"code": 1}}},
     )
-    assert robot.state["errors"] == [{"code": 1}]
+    assert "errors" not in robot.state
 
 
 async def test_stream_lifecycle(coordinator):

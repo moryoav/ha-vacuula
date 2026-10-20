@@ -177,10 +177,14 @@ async def test_boundaries(hass, setup):
     with pytest.raises(ServiceValidationError):
         await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[polygon])
     polygon["vertices"].append([0, 1])
-    with pytest.raises(ServiceValidationError):
-        await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[polygon])
+    # Like the Vacuula app, a missing Gen3 relevancy is the vertex average.
+    await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[polygon])
+    sent = coordinator.async_command.await_args.args[1]["params"]["boundaries"][0]
+    assert sent["relevancy"] == pytest.approx([1 / 3, 2 / 3])
     polygon["relevancy"] = [0.5, 0.5]
     await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[polygon])
+    sent = coordinator.async_command.await_args.args[1]["params"]["boundaries"][0]
+    assert sent["relevancy"] == [0.5, 0.5]
     robot.generation = GEN4
     with pytest.raises(ServiceValidationError):
         await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[polygon])

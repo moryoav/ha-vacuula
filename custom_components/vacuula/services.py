@@ -1,5 +1,7 @@
 """Validated actions for maps, schedules and advanced Vacuula features."""
 
+import math
+from contextlib import suppress
 from copy import deepcopy
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -42,16 +44,25 @@ _GEN3_EVENT = vol.Schema(
         vol.Optional("boundary"): vol.Any(None, dict),
     }
 )
-_VERTEX = vol.All(
-    [vol.All(vol.Coerce(float), vol.Range(min=0, max=1))], vol.Length(min=2, max=2)
-)
+
+
+def _finite(value: float) -> float:
+    if not math.isfinite(value):
+        raise vol.Invalid("must be a finite number")
+    return value
+
+
+# Accept what the Vacuula app stores, so boundaries read with get_data can be
+# written back: it saves empty names, older colours that are not #rrggbb, and
+# points placed just outside the map (normalized coordinates are not clamped).
+_VERTEX = vol.All([vol.All(vol.Coerce(float), _finite)], vol.Length(min=2, max=2))
 _BOUNDARY = vol.Schema(
     {
         vol.Required("id"): _IDENTIFIER,
-        vol.Required("name"): _NAME,
-        vol.Required("color"): vol.Match(r"^#[0-9a-fA-F]{6}$"),
+        vol.Required("name"): vol.All(str, vol.Length(max=128)),
+        vol.Required("color"): vol.All(str, vol.Length(max=64)),
         vol.Required("type"): vol.In(["polygon", "polyline"]),
-        vol.Required("vertices"): vol.All([_VERTEX], vol.Length(min=2, max=100)),
+        vol.Required("vertices"): vol.All([_VERTEX], vol.Length(min=2, max=1000)),
         vol.Required("enabled"): bool,
         vol.Optional("function"): vol.In(["cleaning", "nogo"]),
         vol.Optional("relevancy"): _VERTEX,
@@ -240,6 +251,15 @@ def _merge_schedule_event(
         }
     elif cleaning_type is not None:
         target = cleaning_target(robot, cleaning_type, require_dock=False).get("map")
+        if (
+            target is None
+            and cleaning_type == "auto"
+            and any(isinstance(run.get("map"), dict) for run in runs)
+        ):
+            # Automatic found no promoted floorplan. Do not silently turn a
+            # mapped or zoned event into whole-home cleaning; that must be an
+            # explicit choice (cleaning_type: house).
+            raise _error("map_unavailable")
     else:
         target = None
 
@@ -473,7 +493,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
                         and boundary["type"] == "polygon"
                         and "relevancy" not in boundary
                     ):
-                        raise _error("invalid_boundary")
+                        # The Vacuula app computes this as the vertex average
+                        # (components/map/utils.ts calcRelevancy).
+                        vertices = boundary["vertices"]
+                        boundary["relevancy"] = [
+                            sum(point[0] for point in vertices) / len(vertices),
+                            sum(point[1] for point in vertices) / len(vertices),
+                        ]
                 if robot.generation == GEN3:
                     result = await coordinator.async_command(
                         serial,
@@ -496,7 +522,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 dr.async_get(hass).async_update_device(
                     data["device_id"], name=data["name"]
                 )
-                coordinator.async_set_updated_data(coordinator.robots)
+                coordinator.async_update_listeners()
             elif action == "update_map":
                 await coordinator.async_update_map(
                     serial, data["map_id"], data["name"], data["enabled"]
@@ -517,7 +543,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
             else:
                 return {"data": await _get_data(coordinator, robot, data)}
             if action == "map_action" and data["action"] != "promote":
-                await coordinator.async_refresh_maps(serial)
+                # The server applied the action; a failed follow-up read must
+                # not report it as failed. The next poll catches up.
+                with suppress(HomeAssistantError):
+                    await coordinator.async_refresh_maps(serial)
             return {"response": result}
         except VacuulaError as err:
             raise HomeAssistantError(

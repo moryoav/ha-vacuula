@@ -469,20 +469,18 @@ async def test_switches_have_only_verified_payloads(coordinator):
 async def test_map_toggle_preserves_name_and_missing_map(coordinator):
     robot = coordinator.robots["robot"]
     robot.maps = [{"id": "map-id", "name": "Floor name", "enabled": False}]
-    coordinator.async_update_map = AsyncMock()
+    # The coordinator re-reads the stored name before writing (see
+    # test_review_fixes for the rename case).
+    coordinator.async_set_map_enabled = AsyncMock()
     entity = VacuulaMapSwitch(coordinator, "robot", "map-id")
     assert entity.translation_placeholders == {"map_name": "Floor name"}
     assert entity.is_on is False
     robot.connected = False
     assert entity.available
     await entity.async_turn_on()
-    coordinator.async_update_map.assert_awaited_with(
-        "robot", "map-id", "Floor name", True
-    )
+    coordinator.async_set_map_enabled.assert_awaited_with("robot", "map-id", True)
     await entity.async_turn_off()
-    coordinator.async_update_map.assert_awaited_with(
-        "robot", "map-id", "Floor name", False
-    )
+    coordinator.async_set_map_enabled.assert_awaited_with("robot", "map-id", False)
     robot.maps = []
     assert not entity.available
     assert entity.is_on is None
@@ -512,7 +510,8 @@ async def test_schedule_event_preserves_command_and_unknowns(coordinator):
     assert len(entities) == 1
     entity = entities[0]
     assert isinstance(entity, VacuulaScheduleEventSwitch)
-    assert entity.translation_placeholders == {"event_name": "08:00"}
+    # Days are included so events at the same time get distinct names.
+    assert entity.translation_placeholders == {"event_name": "mon 08:00"}
     stored_event = deepcopy(event)
 
     async def command(serial, payload):

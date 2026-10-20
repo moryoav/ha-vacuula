@@ -217,18 +217,23 @@ async def test_explicit_zones_replace_selection_without_erasing_run_options(
         assert run == {**source, "map": {**source["map"], "track_id": zone}}
 
 
-@pytest.mark.parametrize(
-    "target", [{"cleaning_type": "house"}, {"cleaning_type": "auto"}]
-)
-async def test_explicit_whole_home_target_removes_zone_runs(
-    hass, schedule_setup, target
-):
+async def test_explicit_whole_home_target_removes_zone_runs(hass, schedule_setup):
     coordinator, _, _, server, writes = schedule_setup
     coordinator.client.async_maps.return_value = []
     expected = deepcopy(server["events"][0])
     expected["command"]["runs"] = [{**expected["command"]["runs"][0], "map": None}]
-    await call(hass, schedule_setup, **target)
+    await call(hass, schedule_setup, cleaning_type="house")
     assert writes == [expected]
+
+
+async def test_automatic_without_promoted_map_keeps_zoned_event(hass, schedule_setup):
+    """Automatic must not silently turn a zoned event into whole-home cleaning."""
+    coordinator, _, _, _, writes = schedule_setup
+    coordinator.client.async_maps.return_value = []
+    with pytest.raises(ServiceValidationError) as error:
+        await call(hass, schedule_setup, cleaning_type="auto")
+    assert error.value.translation_key == "map_unavailable"
+    assert writes == []
 
 
 @pytest.mark.parametrize("field", ["enabled", "days", "time"])

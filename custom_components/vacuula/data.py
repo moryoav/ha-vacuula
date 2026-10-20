@@ -20,6 +20,9 @@ class RobotData:
     maps: list[dict[str, Any]] = field(default_factory=list)
     runs: list[dict[str, Any]] = field(default_factory=list)
     capabilities: dict[str, Any] = field(default_factory=dict)
+    # False once the server no longer lists the robot. Its cached data stays so
+    # existing entities keep working until the user removes the device.
+    listed: bool = True
 
 
 def response_data(response: dict[str, Any]) -> dict[str, Any]:

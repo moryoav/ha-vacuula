@@ -42,6 +42,14 @@ class VacuulaSelect(VacuulaEntity, SelectEntity):
         self._attr_translation_key = key
 
     @property
+    def available(self) -> bool:
+        if self.key == "robot_language":
+            return super().available
+        # Cleaning defaults are stored in Home Assistant and never sent to the
+        # robot when changed, so they stay editable while it is offline.
+        return self.coordinator.last_update_success and self.robot.listed
+
+    @property
     def options(self) -> list[str]:
         if self.key == "cleaning_mode":
             return fan_modes(self.robot)

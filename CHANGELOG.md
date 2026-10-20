@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.5
+
+- Let Vacuula's robot list decide connection status, so one slow or failed robot read no longer makes the robot unavailable or silently drops stop, pause and return-to-base.
+- Stopped failed reads from making entities available again during a server outage; **Refresh data** now reports failed reads.
+- Stopped treating Generation 4 informational notices, such as charging or returning to base, as problems, and ignored `robots.error_codes` events, as the Vacuula app does.
+- Created the device and entities again when a removed robot registers with Vacuula again; a robot that Vacuula stops listing keeps its entities, shown as unavailable.
+- Required `use` before promoting a Generation 4 floorplan and refused `unuse` for the promoted floorplan, as the app does.
+- Kept the recovery block and Repairs notice after a failed floorplan upload until a floorplan is promoted again, the map is no longer in use, or it is demoted with `map_action`; the schedule is now read again after every promotion attempt.
+- Kept map names changed in the Vacuula app when a map switch is toggled; map, schedule-event and robot names now follow renames without a reload, and event names include their days.
+- Removed the entities of deleted maps and schedule events; they return if the record returns.
+- Accepted boundaries saved by the Vacuula app (empty names, older colours, points slightly outside the map) and computed a missing Generation 3 relevancy.
+- Kept the cleaning-default selects and spot sizes editable while the robot is offline.
+- Created the Generation 3 Alert sensor at setup and showed `none` when no alert is active.
+- Refused `update_schedule_event` with `cleaning_type: auto` on a mapped event while no floorplan is promoted, instead of dropping its zones.
+- Changed the default address to `http://vacuula.local` (port 80, Vacuula's default).
+- Kept two servers behind one reverse-proxy address separate, avoided a unique-ID clash with an ignored discovery when a server's address changes, and stopped reporting an applied map change as failed when only the follow-up read fails.
+- Translated the server-unavailable setup message and removed an unused string and icon.
+
 ## 0.1.4
 
 - Refused offline floorplan promotion and active-map boundary edits before saving changes or creating recovery notices.

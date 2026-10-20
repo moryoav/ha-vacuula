@@ -77,15 +77,17 @@ You can also open **Settings > Devices & services** and configure the discovered
    first. Home Assistant reads the address and actual port from the server's
    `_vacuula._tcp.local.` announcement. Already configured servers are excluded.
 2. If no new server can be reached, enter its HTTP or HTTPS origin, for example
-   `http://vacuula.local:81`. The hostname must resolve from Home Assistant; use
-   the server's LAN address if it does not.
+   `http://vacuula.local`, or `http://vacuula.local:81` if you changed Vacuula's
+   app port from its default of 80. The hostname must resolve from Home
+   Assistant; use the server's LAN address if it does not.
 
 The **Server URL** field also appears when discovered servers are already
 configured, or a discovered address cannot be reached. This allows adding a
 second server or correcting an address advertised by a VPN or Docker host.
 Discovery needs local mDNS traffic to reach Home Assistant; isolated networks
-may require the manual address. Include the protocol and app API port;
-omit `/web`, `/api`, ingress paths, credentials, query parameters, and fragments.
+may require the manual address. Include the protocol, and the app port unless it
+is the default 80; omit `/web`, `/api`, ingress paths, credentials, query
+parameters, and fragments.
 The direct API does not require authentication. Authenticated reverse proxies
 and redirects are not supported. Keep access to this API on a trusted network.
 
@@ -119,7 +121,7 @@ or generation. Diagnostic controls may need enabling in the entity registry.
 
 | Controls | Available functionality |
 | --- | --- |
-| Sensors | Battery, state, action, errors, reported battery details, saved map/run counts, schedule count, and last-run area, duration, timestamps, and status. Additional reported scalar telemetry is available as diagnostics disabled by default. |
+| Sensors | Battery, state, action, errors, Generation 3 alerts, reported battery details, saved map/run counts, schedule count, and last-run area, duration, timestamps, and status. Additional reported scalar telemetry is available as diagnostics disabled by default. |
 | Binary sensors | Server-observed robot connection; charging, docked, and problem state; Generation 3 dustbin state; reported command readiness. Optional Generation 4 quickboost and cleaning-center telemetry and additional reported boolean diagnostics appear when present. |
 | Buttons | Start/resume, stop, pause, return to base, locate, and refresh; supported Generation 3 spot cleaning, mapping exploration, dismiss alert, and diagnostic log upload. Log upload and other maintenance controls may be disabled by default. |
 | Switches | Generation 3 robot sounds, schedule enabled state, and one enabled toggle per saved map; Generation 4 force-floorplan preference and one enabled toggle per existing schedule event. |
@@ -157,6 +159,11 @@ The vacuum's activity distinguishes cleaning and exploration from maintenance.
 Log uploads, software updates, menus and stationary map transfers show docked
 or idle; the Robot action sensor retains the precise phase.
 
+The Error sensor and the Problem binary sensor ignore Generation 4
+informational notices, such as charging on the base or returning to base
+(severity `invalid`, which the Vacuula app labels "Info"). Warnings and errors
+still count. The Generation 3 Alert sensor shows `none` while no alert is active.
+
 Additional scalar diagnostics cover robot state, general information, cleaning
 statistics, the current subrun, the latest dated run, and its latest subrun.
 Numbers and text become diagnostic sensors; booleans become diagnostic binary
@@ -165,10 +172,14 @@ values without inventing units, exclude identity and credential fields, and
 omit arrays and complete object dumps. Latest-run selection compares timestamps
 as absolute instants and skips malformed or timezone-free records.
 
-Map switches keep each map's stored name when changing its enabled setting.
-Schedule-event switches change only `enabled`, preserving the existing days,
-time, and complete cleaning command. New maps and events add switches without
-reloading the integration. Removed records make their switches unavailable.
+Map switches read the map's current name from Vacuula before changing its
+enabled setting, so a rename made in the Vacuula app is kept. Schedule-event
+switches change only `enabled`, preserving the existing days, time, and
+complete cleaning command; their names include the days and time. New maps and
+events add switches without reloading the integration. When a successful read
+shows that a map or schedule event was deleted, its switch and map image are
+removed; they come back if the record returns. Map, schedule-event and robot
+names follow renames made in Vacuula without a reload.
 
 Floor-map images are rendered locally as PNGs from stored floor grids. They do
 not include a live path or editable boundary overlay. Maps and run history are
@@ -198,7 +209,7 @@ context. Standard vacuum entity controls use the usual entity permissions.
 | `vacuula.set_boundaries` | Required `map_id`, `boundaries` | Both. Replaces the complete boundary list; `[]` removes all boundaries. Generation 4 re-promotes an active map after saving so the robot receives the new zones. Inactive maps stay inactive. Read and preserve existing boundaries first. |
 | `vacuula.rename_robot` | Required `name` | Both. Changes the name stored by Vacuula. |
 | `vacuula.update_map` | Required `map_id`, `name`, `enabled` | Both. Changes the map name; `enabled` applies to Generation 3 maps. |
-| `vacuula.map_action` | Required `map_id`, `action` | Generation 4. `promote`, `use`, `unuse`, or `demote`; demotion removes active floorplan status. |
+| `vacuula.map_action` | Required `map_id`, `action` | Generation 4. `promote`, `use`, `unuse`, or `demote`; demotion removes active floorplan status. As in the Vacuula app, only a floorplan marked with `use` can be promoted, and the active floorplan must be demoted before `unuse`. |
 | `vacuula.get_data` | Required `resource`; conditional `map_id` or `run_id` | Both. Returns `data` and requires a response variable. See resources below. |
 | `vacuula.factory_reset` | Required `confirm: true` | Generation 4 only. Erases robot settings and may require provisioning again. `false` is rejected. |
 
@@ -240,6 +251,8 @@ under one robot lock; a missing or ambiguous event ID is rejected. Supplying
 `mode`, `navigation` or `nogo_enabled` changes that setting across its runs.
 An explicit `zone_ids` list replaces the zones; `zone_ids: []` selects the
 whole floorplan. Selecting `cleaning_type: house` removes the mapped target.
+`cleaning_type: auto` is rejected for an event that targets a map while no
+floorplan is promoted, instead of silently dropping its map and zones.
 When changing floorplans, an event with existing zones requires an explicit
 `zone_ids` list for the new map, or `[]` for its whole floorplan.
 
@@ -247,24 +260,30 @@ An active Gen4 boundary update re-promotes the map. Vacuula demotes the previous
 floorplan first, so a rejected or timed-out promotion can leave the robot
 without an active floorplan or no-go protection. Promotion and active-map
 boundary edits are refused while the robot is offline, before saving changes.
-After an upload, the integration reads current map status. A failed action
-still reports an error, but a confirmed promoted or inactive map clears the
-recovery marker. Inactive maps allow the usual Automatic whole-home fallback
-without no-go protection. The server cannot distinguish a failed promotion
-from a deliberate demotion in its map status.
+The robot firmware may also disable schedule events affected by a map change
+(the Vacuula app warns about this), so the integration re-reads the schedule
+after each promotion and the event switches show the result.
 
-Only unknown status retains a Repairs notice and blocks Automatic/mapped
-starts and schedule commands. The notice identifies the robot and map ID.
-A fresh map read detects promotion or demotion made in the Vacuula app;
-removing the map or robot also clears the notice. Use **Refresh data** or retry
-the action to request current status. Explicit mapless cleaning remains
-available. Existing robot schedules and controls outside this integration
-are not blocked. Robot commands are never retried automatically.
+After a failed upload the integration keeps a recovery marker: a Repairs notice
+names the robot and map ID, and new Automatic or mapped starts and mapped
+schedule commands are blocked, so Automatic does not quietly clean without the
+no-go zones you just edited. The marker clears when a floorplan is active again
+(promoted here or in the Vacuula app), when you demote the map with
+`vacuula.map_action` to continue without it, when the map is no longer in use,
+or when the robot is removed. Vacuula reports a failed upload and a deliberate
+demotion the same way, so a demotion made only in the Vacuula app does not
+clear it; demote with the action instead. Explicit whole-home cleaning remains
+available. Existing robot schedules and controls outside this integration are
+not blocked. Robot commands are never retried automatically.
 
-A boundary contains `id`, `name`, `color` (`#RRGGBB`), `type` (`polygon` or
-`polyline`), `vertices`, and `enabled`. Vertices are normalized `[x, y]` pairs
-between 0 and 1, with at least three for a polygon or two for a polyline, and at
-most 100. Generation 3 polygons also require a normalized `relevancy` point.
+A boundary contains `id`, `name`, `color`, `type` (`polygon` or `polyline`),
+`vertices`, and `enabled`. Values are accepted as the Vacuula app stores them,
+so boundaries read with `get_data` can be written back: names may be empty,
+colours are usually `#RRGGBB` but older values are kept, and vertices are
+normalized `[x, y]` pairs that can sit slightly outside 0–1 where a point was
+placed off the map. A polygon needs at least three vertices and a polyline two,
+up to 1000. Generation 3 polygons use a normalized `relevancy` point; when it is
+omitted it is computed as the average of the vertices, as the app does.
 Generation 4 boundaries require `function: cleaning` or `function: nogo` and must
 omit `relevancy`. An action accepts up to 100 boundaries.
 
@@ -312,15 +331,25 @@ including 404 responses while idle, are retried on later detail polls; only
 explicit unsupported-command responses disable a query until reload.
 
 Event streams reconnect with backoff from 1 to 60 seconds. The independent
-polling timer recovers missed events and discovers newly added robots. A robot
-losing its connection makes its live controls and telemetry unavailable while
-other robots keep working. Its connection sensor and stored map images can
-remain available through the server. The integration logs connection loss and
-recovery without printing command payloads.
+polling timer recovers missed events and discovers newly added robots. A
+robot's connection follows Vacuula's robot list. A slow or failed read, such as
+Vacuula's 30-second robot timeout, is logged but does not make the robot or its
+controls unavailable. When Vacuula reports the robot disconnected, its live
+controls and telemetry become unavailable while other robots keep working. Its
+connection sensor and stored map images can remain available through the
+server. A robot that Vacuula stops listing keeps its device and entities, shown
+as unavailable, until it is listed again. The integration logs unanswered reads and recovery without printing
+command payloads. Only the server poll and event stream decide whether the
+server is reachable; a failed read during an outage never makes entities
+available again with stale values. **Refresh data** reports an error when the
+robot or its maps cannot be read.
 
 Generation 3 map switches also remain available while the robot is offline
-because their settings belong to the server. Schedule-event switches require a
-connected robot. Both use readback after changes.
+because their settings belong to the server. The cleaning-default selects and
+spot sizes stay editable too, because they are stored in Home Assistant.
+Schedule-event switches require a connected robot. Both kinds of switch read
+back after changes; a change the server applied is not reported as failed when
+only the follow-up read fails.
 
 Robot commands are serialized per robot and sent once. A timeout does not prove
 that the robot ignored a command, so commands are never automatically retried.
@@ -341,10 +370,9 @@ After a successful command, the integration reads state back from the robot.
   Run maps, live robot paths, and boundary editing are not image features.
 - **Server address changed:** use **Reconfigure** with the new origin. Zeroconf
   rediscovery can also update the URL when a known robot identifies the server.
-- **Unknown floorplan status:** check **Settings > System > Repairs** for the
-  robot and map ID. Verify the saved map in Vacuula, then use **Refresh data**.
-  Promotion or demotion in the app is recognized on a fresh map read. Inactive
-  maps allow whole-home Automatic cleaning without no-go protection.
+- **Floorplan upload not confirmed:** check **Settings > System > Repairs** for
+  the robot and map ID. Promote the floorplan again in Vacuula or with
+  `vacuula.map_action`, or demote it with the action to continue without it.
 
 Download integration diagnostics from **Settings > Devices & services** when
 investigating a fault. Diagnostics use cached data only and omit the server URL,
@@ -356,7 +384,8 @@ To remove the custom code as well, remove **Vacuula** from HACS, or delete
 `/config/custom_components/vacuula` if installed manually, then restart Home
 Assistant. Removing the integration does not delete robots,
 maps, or schedules from Vacuula. A robot no longer listed by the server can be
-removed from Home Assistant's device registry.
+removed from Home Assistant's device registry. If it registers with Vacuula
+again later, its device and entities are created again without a reload.
 
 ## Development
 

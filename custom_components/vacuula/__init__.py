@@ -79,7 +79,13 @@ async def async_remove_config_entry_device(
         robots = await client.async_robots()
     except VacuulaError:
         return False
-    return not any(
-        domain == DOMAIN and serial in robots
-        for domain, serial in device_entry.identifiers
-    )
+    serials = [
+        serial for domain, serial in device_entry.identifiers if domain == DOMAIN
+    ]
+    if any(serial in robots for serial in serials):
+        return False
+    if coordinator is not None:
+        # Let the robot's device and entities be created again if it returns.
+        for serial in serials:
+            coordinator.async_forget_robot(serial)
+    return True

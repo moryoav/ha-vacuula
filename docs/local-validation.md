@@ -120,6 +120,8 @@ All 25 installed 0.1.4 files matched the tested source by SHA-256. Home Assistan
 
 The regression tests for these problems were checked to fail on the 0.1.4 code. All robot writes were tested with mocked transports; no movement, schedule, boundary, preference or reset command was sent to the physical robot. The Vacuula app was not modified.
 
+All 25 installed 0.1.5 files matched the committed source by SHA-256. Home Assistant configuration validation passed before and after copying. After one restart, the existing entry was **loaded**, a real diagnostics download confirmed runtime **0.1.5** without the robot serial or server URL, and the D5 remained connected and docked. The 37 existing entities kept their states, and the Generation 3 Alert sensor was added with the value `none`. The log showed no Vacuula warnings or errors apart from Home Assistant's standard custom-integration notice. The previous installation was backed up outside the source repository.
+
 ## Quality target
 
 The implementation follows the current quality-scale checklist and has no official tier claim. Public brands submission, separately published typed client packaging, and formal Core assessment remain pending. Source, tests and documentation are maintained in `moryoav/ha-vacuula` while owner testing continues.

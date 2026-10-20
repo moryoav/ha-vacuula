@@ -1,5 +1,7 @@
 # Vacuula for Home Assistant
 
+**I maintain this independent, fan-made repository. It is not affiliated with the Vacuula team and has not been reviewed, checked, or endorsed by them.**
+
 <p align="center">
   <img src="custom_components/vacuula/brand/icon@2x.png" alt="Vacuula vampire robot" width="128" height="128">
 </p>

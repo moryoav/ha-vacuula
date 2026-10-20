@@ -26,6 +26,7 @@ These statuses are a development checklist, subject to independent review.
 | Diagnostics | Cached allowlisted telemetry including reviewed details/meta fields; server URL, robot identities, maps, and complete schedule contents are excluded. No diagnostic network requests. |
 | Repairs | A persisted marker records an unconfirmed Gen4 floorplan upload. Offline promotions are refused before writes. After a failed upload, the guard and a notice naming the robot and map ID stay until a floorplan is promoted again (here or in the app), the map leaves use, or it is demoted with `map_action`. |
 | Documentation | README includes installation/removal, setup fields, entities, all actions, examples, data updates, supported generations, limitations, and troubleshooting. Protocol notes identify the reviewed API and validation limits. All Python definitions have docstrings, with 100% presence coverage enforced by a repository-wide AST audit in pytest and GitHub checks. |
+| Branding | Official Vacuula artwork is bundled in `brand/` as transparent 256- and 512-pixel PNG icons. Home Assistant supplies logo and dark-theme fallbacks. Artwork sources and licensing are preserved in `docs/branding/`. |
 
 ## Verification boundary
 
@@ -51,7 +52,7 @@ The local test suite uses mocked transports and does not contact the robot.
 | Requirement | Remaining work |
 | --- | --- |
 | Dependency transparency | Extract the independent protocol client into its own typed package, publish it on PyPI with public source and build/release CI, and pin it in the integration manifest. No such package publication is claimed here. |
-| Brands | Submit and obtain approval for the required brand icon/logo assets. |
+| Core branding | When contributing to Core, move the bundled custom-integration artwork to the central brands repository and obtain approval there. Local custom-integration branding is complete. |
 | Coverage | Local results meet the [coverage rule](https://contributors.home-assistant.io/core/quality-scale/test-coverage/). Preserve this coverage through client extraction and repeat checks when preparing an upstream submission. |
 | Strict typing | Local strict mypy passes. Ship `py.typed` with the separate client and complete the Core `.strict-typing` registration and checks when preparing an upstream submission. See the [strict typing rule](https://contributors.home-assistant.io/core/quality-scale/strict-typing/). |
 | Upstream review | Complete applicable Core validation, publish user documentation in the required location, and obtain maintainer review of every rule and exemption. Local status files cannot award a tier. |

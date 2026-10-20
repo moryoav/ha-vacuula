@@ -4,8 +4,8 @@ rules:
   action-setup: done
   appropriate-polling: done
   brands:
-    status: todo
-    comment: Brand assets have not been submitted to the Home Assistant brands repository.
+    status: done
+    comment: Bundled official Vacuula PNG icons at 256 and 512 pixels in brand/; local custom-integration branding follows the current guide.
   common-modules: done
   config-flow: done
   config-flow-test-coverage: done

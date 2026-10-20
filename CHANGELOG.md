@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8
+
+- Bundled official Vacuula branding as transparent 256- and 512-pixel icons, with automatic logo and dark-theme fallbacks in Home Assistant.
+- Preserved upstream artwork, attribution and licensing, and documented reproducible image rendering and local verification.
+- Added the Vacuula artwork to the README and updated the local branding quality checklist.
+
 ## 0.1.7
 
 - Documented every Python module, class, function and method, including test fixtures, constructors, private helpers and nested callbacks.

@@ -1,0 +1,18 @@
+Vacuula artwork
+
+The original vacuula.svg and the derived icon.png and icon@2x.png identify the
+Vacuula project: https://github.com/vacuula/vacuula
+
+Source: app/public/favicon-vacuula.svg at upstream commit
+fa372600e04917f81074f2e8a336d9c6a2966d1e
+https://github.com/vacuula/vacuula/blob/fa372600e04917f81074f2e8a336d9c6a2966d1e/app/public/favicon-vacuula.svg
+
+The upstream artwork is provided under the GNU Affero General Public License
+version 3. The complete license is included in LICENSE-AGPL-3.0.txt, and the
+original SVG source is included in vacuula.svg.
+
+Changes: Rendered the SVG to PNG, trimmed transparent margins, centered it in a
+square and resized to 256 and 512 pixels. Colors, shapes and effects are unchanged.
+
+Product names and artwork belong to their respective owners. Their use here
+identifies the connected project and does not imply endorsement.

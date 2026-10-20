@@ -1,5 +1,9 @@
 # Vacuula for Home Assistant
 
+<p align="center">
+  <img src="custom_components/vacuula/brand/icon@2x.png" alt="Vacuula vampire robot" width="128" height="128">
+</p>
+
 [![HACS custom repository](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=flat-square)](#installation)
 
 ---
@@ -427,3 +431,8 @@ See [local validation results](docs/local-validation.md) and
 [the quality assessment](docs/quality-scale.md) for outstanding release
 requirements. No command, schedule change,
 map edit, or factory reset is needed for read-only hardware validation.
+
+## Artwork
+
+The integration includes the official Vacuula artwork in Home Assistant's local
+`brand/` format. See [artwork sources, licensing and reproduction](docs/branding/README.md).

@@ -1,6 +1,6 @@
 # Local validation, 20 October 2026
 
-Integration version: **0.1.7**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.8**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
 
 ## Automated checks
 
@@ -203,6 +203,31 @@ Home Assistant configuration validation passed before and after copying. A resta
 loaded the existing Vacuula entry with runtime version 0.1.7, a healthy coordinator
 and the D5 connected and docked without an error. The previous 0.1.6 installation
 was backed up outside the repository.
+
+## Bundled branding, 0.1.8
+
+The official Vacuula SVG was rendered without changes to its colors, shapes or
+effects, trimmed to remove excess transparency, centered in a square and resized.
+`brand/icon.png` is 256 × 256 and `brand/icon@2x.png` is 512 × 512. Both are
+lossless, interlaced RGBA8 PNGs; image dimensions, transparency and all PNG chunk
+checksums were verified. Visual review covered white and dark backgrounds.
+The original SVG, complete upstream license and attribution notice ship in the
+same directory. [Artwork provenance and reproduction](branding/README.md)
+records the pinned upstream source and rendering commands.
+
+Home Assistant 2026.10.2 initially returned HTTP 404 for the missing Vacuula icon
+with `placeholder=no`. After installation and restart, all eight supported
+icon/logo, normal/high-resolution and light/dark requests returned HTTP 200,
+`image/png` and SHA-256 hashes matching the expected packaged icon or documented
+fallback. No generic placeholder was accepted as a successful result. The
+square artwork needs only the two icon files, following the current guide.
+
+Hassfest passed with zero invalid integrations, and the focused docstring and
+integration tests passed (33 tests). The prior complete 711-test run and 99.50%
+test coverage remain applicable: no Python implementation or test code changed
+in this branding update. Docstring coverage remains 779/779 items, or 100%.
+The 0.1.7 installation was backed up outside Git, and configuration validation
+passed before and after installing all 30 component files.
 
 ## Quality target
 

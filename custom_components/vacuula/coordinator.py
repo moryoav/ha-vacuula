@@ -114,6 +114,8 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         # State replies and pushes use separate connections. Keep only deltas
         # received during each locked read so its older reply cannot erase them.
         self._state_read_updates: dict[str, dict[str, Any]] = {}
+        # Server snapshots also travel over independent HTTP and SSE channels.
+        self._server_snapshot_revision = 0
         # Unique IDs already added, per platform module and robot serial. Kept
         # here so a removed device or record can be added again when it returns.
         self.known_entities: dict[str, dict[str, set[str]]] = {}
@@ -186,12 +188,14 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         """Poll the server and refresh listed robots with throttled details."""
         try:
             self.server_info = await self.client.async_server_info()
+            snapshot_revision = self._server_snapshot_revision
             snapshot = await self.client.async_robots()
         except VacuulaError as err:
             raise UpdateFailed(
                 translation_domain=DOMAIN, translation_key="server_unavailable"
             ) from err
-        await self._async_snapshot(snapshot)
+        if snapshot_revision == self._server_snapshot_revision:
+            await self._async_snapshot(snapshot)
         for serial, robot in list(self.robots.items()):
             if not robot.listed:
                 continue
@@ -303,6 +307,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             try:
                 async with aclosing(self.client.async_server_events()) as stream:
                     async for snapshot in stream:
+                        self._server_snapshot_revision += 1
                         await self._async_snapshot(snapshot)
                         self.async_set_updated_data(self.robots)
                         delay = 1
@@ -1201,22 +1206,24 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                     command = {**settings, **changes, "ability": ability}
                 robot = self.robots[serial]
                 native_command = command.get("cmd")
-                if robot.generation == GEN3 and (
+                clear_home_on_ack = robot.generation == GEN3 and (
                     native_command
                     in {
                         "startCleaning",
                         "startPersistentMapExploration",
-                        "stopCleaning",
                     }
                     or (
                         native_command == "resumeCleaning"
                         and robot.return_phase == "pending"
                     )
-                ):
-                    # A newly chosen task supersedes unobserved home intent;
-                    # resuming an observed paused trip keeps its home context.
-                    clear_return_trip(robot)
+                )
                 result = await self.client.async_command(serial, command)
+                if clear_home_on_ack:
+                    # An accepted new task supersedes home intent; rejected
+                    # requests leave it intact. Stop waits for actual terminal
+                    # telemetry, and resuming an observed paused trip keeps its
+                    # home context.
+                    clear_return_trip(robot)
                 if refresh:
                     await self._async_command_readback_locked(
                         self.robots[serial], command

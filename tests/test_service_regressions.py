@@ -529,7 +529,14 @@ async def test_queued_clean_and_schedule_recheck_map_recovery_under_lock(
                 coordinator._set_pending_promotion(robot.serial, "map1")
             if cleaning_type == "house":
                 await task
-                sent = client.async_command.await_args_list[0].args[1]
+                writes = [
+                    request.args[1]
+                    for request in client.async_command.await_args_list
+                    if request.args[1].get("ability")
+                    in {"cleaning.start", "scheduling.update"}
+                ]
+                assert len(writes) == 1
+                sent = writes[0]
                 if action == "update_schedule_event":
                     sent = sent["event"]["command"]
                 assert sent["runs"][0]["map"] is None
@@ -537,8 +544,16 @@ async def test_queued_clean_and_schedule_recheck_map_recovery_under_lock(
                 with pytest.raises(ServiceValidationError) as error:
                     await task
                 assert error.value.translation_key == "map_promotion_required"
-                client.async_command.assert_not_awaited()
+                if action == "clean":
+                    # State reads precede selection; no cleaning command may pass.
+                    assert [
+                        request.args[1]
+                        for request in client.async_command.await_args_list
+                    ] == [{"ability": "state.show"}]
+                else:
+                    client.async_command.assert_not_awaited()
     finally:
         if task and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        await coordinator.async_stop()

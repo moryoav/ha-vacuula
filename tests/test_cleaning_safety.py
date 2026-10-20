@@ -120,14 +120,20 @@ async def test_default_start_refreshes_maps_and_preserves_no_go_lines(
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
 @pytest.mark.parametrize("docked", [False, None])
-async def test_automatic_start_button_falls_back_when_not_docked(
+async def test_automatic_start_button_distinguishes_offdock_from_unknown(
     coordinator, generation, docked
 ):
-    """Allow Automatic to use whole-home cleaning when docking is unconfirmed."""
+    """Use mapless fallback only for an explicit off-dock report."""
     robot = prepare_robot(coordinator, generation)
     robot.state["details"] = {"isDocked" if generation == GEN3 else "is_docked": docked}
     button = VacuulaButton(coordinator, "robot", "start")
     assert button.available
+    if docked is None:
+        with pytest.raises(ServiceValidationError) as error:
+            await button.async_press()
+        assert error.value.translation_key == "dock_status_unknown"
+        coordinator.dispatched_command.assert_not_awaited()
+        return
     await button.async_press()
     payload = coordinator.dispatched_command.await_args.args[1]
     assert coordinator.dispatched_command.await_args.kwargs == {}
@@ -148,7 +154,9 @@ async def test_explicit_mapped_cleaning_still_requires_dock(
     coordinator.cleaning_options["robot"] = {"category": "map"}
     with pytest.raises(ServiceValidationError) as error:
         await VacuulaVacuum(coordinator, "robot").async_start()
-    assert error.value.translation_key == "map_cleaning_requires_dock"
+    assert error.value.translation_key == (
+        "dock_status_unknown" if docked is None else "map_cleaning_requires_dock"
+    )
     coordinator.dispatched_command.assert_not_awaited()
 
 

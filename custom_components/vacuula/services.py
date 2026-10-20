@@ -413,6 +413,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
         data = dict(call.data)
         serial = robot.serial
         action = call.service
+        if action == "set_boundaries" and len(
+            {boundary["id"] for boundary in data["boundaries"]}
+        ) != len(data["boundaries"]):
+            raise _error("duplicate_boundary_ids")
         try:
             result: Any
             if action in {"set_boundaries", "update_map", "map_action"}:
@@ -425,6 +429,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     lambda current: _clean_command(current, data, use_default_map=True),
                     require_map_recovery=data["cleaning_type"] != "house",
                     refresh_maps=data["cleaning_type"] != "house",
+                    refresh_state=True,
                 )
             elif action == "set_schedule":
                 _require_generation(robot, GEN3)

@@ -35,6 +35,15 @@ _IDENTITY = {
 }
 
 
+def safe_text(value: Any) -> str | None:
+    """Bound diagnostic text and omit URLs, email addresses and private-key text."""
+    if not isinstance(value, str) or any(
+        marker in value.lower() for marker in ("://", "-----begin", "@")
+    ):
+        return None
+    return value[:255]
+
+
 def source_data(robot: RobotData, source: str) -> dict[str, Any]:
     """Return only bounded dictionaries; histories expose the latest dated record."""
     if source in {"state", "info", "stats"}:
@@ -104,10 +113,8 @@ def scalars(
         if isinstance(value, dict) and len(current) < 4:
             yield from scalars(value, current)
         elif isinstance(value, str):
-            if not any(
-                marker in value.lower() for marker in ("://", "-----begin", "@")
-            ):
-                yield current, value[:255]
+            if (text := safe_text(value)) is not None:
+                yield current, text
         elif isinstance(value, bool):
             yield current, value
         elif (

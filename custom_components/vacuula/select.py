@@ -16,6 +16,18 @@ from .vacuum import cleaning_mode, fan_modes
 PARALLEL_UPDATES = 0
 
 
+def _language_options(robot: RobotData) -> list[str]:
+    """Return distinct advertised languages from a valid optional list."""
+    languages = robot.preferences.get("available_languages")
+    if not isinstance(languages, list):
+        return []
+    return list(
+        dict.fromkeys(
+            item for item in languages if isinstance(item, str) and item.strip()
+        )
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry[VacuulaCoordinator],
@@ -30,7 +42,7 @@ def create_entities(
 ) -> list[VacuulaSelect]:
     """Build local cleaning selectors plus a supported Gen4 language control."""
     keys = ["cleaning_mode", "navigation_mode", "cleaning_category"]
-    if robot.generation != GEN3 and robot.preferences.get("available_languages"):
+    if robot.generation != GEN3 and _language_options(robot):
         keys.append("robot_language")
     return [VacuulaSelect(coordinator, robot.serial, key) for key in keys]
 
@@ -50,7 +62,7 @@ class VacuulaSelect(VacuulaEntity, SelectEntity):
     def available(self) -> bool:
         """Allow offline default edits; require connection for language writes."""
         if self.key == "robot_language":
-            return super().available
+            return super().available and bool(self.options)
         # Cleaning defaults are stored in Home Assistant and never sent to the
         # robot when changed, so they stay editable while it is offline.
         return self.coordinator.last_update_success and self.robot.listed
@@ -79,11 +91,7 @@ class VacuulaSelect(VacuulaEntity, SelectEntity):
             ):
                 options.append("spot")
             return options
-        return [
-            item
-            for item in self.robot.preferences.get("available_languages", [])
-            if isinstance(item, str)
-        ]
+        return _language_options(self.robot)
 
     @property
     def current_option(self) -> str | None:

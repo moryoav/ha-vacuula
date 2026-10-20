@@ -124,20 +124,22 @@ def cleaning_target(
         raise ServiceValidationError(
             translation_domain=DOMAIN, translation_key="ambiguous_map"
         )
-    if (
-        require_dock
-        and value_at(
+    if require_dock:
+        docked = value_at(
             robot.state,
             "details",
             "isDocked" if robot.generation == GEN3 else "is_docked",
         )
-        is not True
-    ):
-        if category == "auto":
+        if not isinstance(docked, bool):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="dock_status_unknown"
+            )
+        if docked is False and category == "auto":
             return mapless
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="map_cleaning_requires_dock"
-        )
+        if docked is False:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="map_cleaning_requires_dock"
+            )
     if robot.generation == GEN3:
         return {"category": 4}
     return {"map": {"rank_id": maps[0]["id"], "track_id": None, "nogo_enabled": True}}

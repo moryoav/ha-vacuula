@@ -1,13 +1,13 @@
 # Local validation, 20 October 2026
 
-Integration version: **0.1.11**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. During the follow-up review, the live HACS installation was **0.1.10**. That review used fixtures and loopback HTTP servers; it did not deploy the new changes or move the robot.
+Integration version: **0.1.12**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. During the latest review, the live HACS installation was **0.1.11**. Review tests used protocol fixtures and controlled failure sequences; Generation 4 remains source-verified without Gen4 hardware.
 
 ## Automated checks
 
-- **935 tests passed**, including 156 additional cases since the released 0.1.10 suite. These cover unfinished map handlers, server restart evidence, external map changes, unsent requests, implicit DELETE retries, fresh Home permission, bounded and repeated Home intent, state-read/event races, migration and notice cleanup. Existing real Home Assistant platform loading, discovery, scheduling, concurrency, protocol and lifecycle tests also passed.
-- **99.48% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
+- **1,058 tests passed**, including 123 additional cases since the released 0.1.11 suite. These cover server-list races, fresh advanced-cleaning targets, unknown docking, duplicate boundary IDs, rejected-control intent, optional language choices, changing diagnostic text and overall Gen4 cleaning completion, alongside the earlier protocol and recovery regressions.
+- **99.54% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 21 integration and tool modules.
-- **100% docstring coverage: 995/995 items in 69 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
+- **100% docstring coverage: 1,050/1,050 items in 77 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
 - Actionlint: **passed**, GitHub workflow syntax and expressions validated.
@@ -369,6 +369,50 @@ idle and docked, 98% battery, with no reported error. No movement, preferences,
 schedules, map changes or other writes were sent to the physical robot during
 this follow-up review. Gen4 remains source-verified and simulated, without Gen4
 hardware. The Vacuula app was not modified.
+
+## Full review of 0.1.11
+
+Reviewed released commit `2e0e9650b9d8e47446b709eb1e966d3123a428e7` across
+transport, server and robot event handling, controls, map recovery, actions,
+schedules, setup, discovery, entities, diagnostics and lifecycle. Three independent
+review passes and failing regressions established these further defects:
+
+- An older HTTP robot-list reply could overwrite a newer server event. This
+  restored old connection flags and names or incorrectly treated a listed robot
+  as removed, clearing its map-recovery guard. A server-event revision now keeps
+  an overlapping older poll from replacing that newer complete snapshot.
+- Advanced `vacuula.clean` chose its docking policy from cached state. A robot
+  that had docked since the cache could receive a mapless run despite an active
+  map. Advanced cleaning now reads state under the same lock as target selection.
+  Unknown docking is also distinct from an explicit off-dock report: with an
+  active map, it cannot silently authorize the Automatic fallback. Future
+  schedules do not depend on present docking.
+- Duplicate boundary IDs were accepted. The exact Gen4 handler, executed
+  unchanged against scratch SQLite data, replaced the same existing region twice
+  and returned success with only the final region. Both generations now reject
+  duplicate IDs before network I/O; valid order and empty replacements remain.
+- The coordinator cleared home intent before a new task was accepted. Rejected,
+  lost or cancelled Stop/task requests could therefore publish Cleaning during
+  the same unchanged trip home, including through concurrent state events. New
+  tasks replace intent after acknowledgement; Stop waits for terminal telemetry.
+- A malformed optional language list could crash the language selector or turn
+  a string into individual-letter options. Validated choices keep the selector
+  safe and allow recovery when a proper list returns.
+- Dynamic diagnostic text was filtered only when first discovered. Later URLs,
+  emails or private-key text could become entity states. Dynamic text now uses
+  the same privacy check on every read and recovers when safe text returns.
+- Gen4 last-run status used the final zone's state when overall completion was
+  false. The app displays `cleaning_complete` as its overall result
+  (`app/src/pages/runs/runs.tsx`, lines 72 and 94). Status now reports `done`
+  only for true, `incomplete` for false and unknown for missing or malformed
+  flags. Gen3 status is unchanged.
+
+The complete suite passed in 124.45 seconds. Ruff, strict mypy, the repository-wide
+docstring check, Hassfest and workflow validation passed. A fresh live check
+confirmed Vacuula app 1.0.0 and the installed 0.1.11 integration healthy, with the
+D5 idle and docked at 99% and no reported error. The app was not modified. No
+cleaning, schedule, preference, map or destructive robot action was needed to
+reproduce these failures. Gen4 behavior remains source-verified and simulated.
 
 ## Quality target
 

@@ -297,7 +297,10 @@ Gen3 intent waits at most 60 seconds for observed departure, then tracks a trip
 for at most 15 minutes without renewing its deadline on duplicate reports or
 pause/resume. Repeated Home requests do not pause or resend an accepted pending
 or moving trip. Lost acknowledgements preserve observed motion; terminal states,
-explicit new cleaning or cancellation commands, and expiry remove old context.
+accepted new cleaning commands, terminal Stop telemetry, and expiry remove old
+context. Rejected or interrupted requests do not erase an otherwise confirmed
+trip. An overlapping HTTP robot-list poll also cannot replace a newer server
+snapshot or use its older empty list to clear recovery as if the robot was removed.
 State pushes arriving during an HTTP state read are overlaid as field deltas so
 the older response does not erase those updates. Neither channel supplies a
 shared source sequence, so this preserves arrival order rather than claiming

@@ -33,7 +33,7 @@ from .entity import (
     number,
     value_at,
 )
-from .telemetry import key_and_label, latest_record, scalars, source_data
+from .telemetry import key_and_label, latest_record, safe_text, scalars, source_data
 
 PARALLEL_UPDATES = 0
 
@@ -372,15 +372,10 @@ def last_value(robot: RobotData, kind: str) -> Any:
         if gen3:
             return _text(run.get("status"))
         complete = latest.get("cleaning_complete")
-        runs = latest.get("runs")
+        # A successful final zone cannot make the whole cleaning successful.
+        # Vacuula's run history uses this flag for its overall completion icon.
         return (
-            "done"
-            if complete is True
-            else (
-                _text(value_at(runs[-1], "state"))
-                if isinstance(runs, list) and runs and isinstance(runs[-1], dict)
-                else None
-            )
+            "done" if complete is True else "incomplete" if complete is False else None
         )
     if kind == "last_battery":
         if gen3:
@@ -447,6 +442,8 @@ def sensor_value(robot: RobotData, desc: VacuulaSensorDescription) -> Any:
         return ", ".join(codes)[:255] if codes else "none"
     path = desc.gen3_path if robot.generation == GEN3 else desc.gen4_path
     raw = value_at(source_data(robot, desc.source), *path) if path else None
+    if kind == "telemetry_text":
+        return safe_text(raw)
     if kind in (
         "text",
         "action",
@@ -524,7 +521,7 @@ def create_entities(
                     source=source,
                     gen3_path=path,
                     gen4_path=path,
-                    kind="text" if isinstance(value, str) else "number",
+                    kind="telemetry_text" if isinstance(value, str) else "number",
                     entity_registry_enabled_default=False,
                     entity_category=EntityCategory.DIAGNOSTIC,
                 )

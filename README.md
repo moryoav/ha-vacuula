@@ -142,14 +142,16 @@ mapping, and maintenance actions. Cleaning defaults stored by Home Assistant do
 not start a run when changed.
 
 New runs default to **Automatic (use saved map)**. Before starting, the
-integration reads the current saved-map list. While docked, Generation 3 uses
+integration reads fresh state and the current saved-map list, including for
+`vacuula.clean`. While docked, Generation 3 uses
 the robot's dock matching against enabled maps; Generation 4 uses the single
 promoted floorplan with no-go areas enabled. When no map is enabled/promoted,
 or the robot is off its dock, Automatic starts whole-home cleaning, matching
 the Vacuula app. This fallback does not apply saved zones or no-go lines.
 Choose **Saved map** to require mapped cleaning and reject those fallback
 conditions. Failed map reads, malformed maps and ambiguous promoted floorplans
-still report an error.
+still report an error. With an active map, missing or invalid docking telemetry
+also reports an error; it does not establish that the robot is off its dock.
 
 **Whole home without a map** is an explicit choice that ignores saved zones and
 no-go lines. Spot cleaning also runs without the saved map. Upgrading from
@@ -178,6 +180,8 @@ acknowledgements do not erase already observed home motion. Gen3 command intent
 waits up to 60 seconds for departure; once movement is observed, its 15-minute
 bound remains absolute through pauses and resumes. Expiry or a confirmed terminal
 state prevents an old trip from labeling a later cleaning run as Returning.
+Rejected or interrupted controls keep that context until telemetry contradicts
+it. An accepted new task replaces it; Stop waits for the robot's terminal state.
 
 The vacuum's activity distinguishes cleaning and exploration from maintenance.
 Log uploads, software updates, menus and stationary map transfers show docked
@@ -195,6 +199,11 @@ sensors. These extras are disabled by default and read-only. They keep raw
 values without inventing units, exclude identity and credential fields, and
 omit arrays and complete object dumps. Latest-run selection compares timestamps
 as absolute instants and skips malformed or timezone-free records.
+Dynamic text is checked for private-looking content on every update, including
+after its entity was created. Generation 4 last-run status uses the overall
+completion flag: `done` for a completed job, `incomplete` for an incomplete job,
+and unknown when that flag is unavailable. Individual zone results remain in
+their separate telemetry.
 
 Map switches read the map's current name from Vacuula before changing its
 enabled setting, so a rename made in the Vacuula app is kept. Schedule-event
@@ -333,7 +342,7 @@ placed off the map. A polygon needs at least three vertices and a polyline two,
 up to 1000. Generation 3 polygons use a normalized `relevancy` point; when it is
 omitted it is computed as the average of the vertices, as the app does.
 Generation 4 boundaries require `function: cleaning` or `function: nogo` and must
-omit `relevancy`. An action accepts up to 100 boundaries.
+omit `relevancy`. An action accepts up to 100 boundaries, each with a distinct ID.
 
 `get_data` resources are `state`, `info`, `stats`, `preferences`, `schedule`, `maps`,
 `runs`, `map`, `run`, and `boundaries`. Generation 3 also supports

@@ -300,6 +300,8 @@ async def test_explicit_new_task_supersedes_pending_home_intent(
 
     async def command(serial, payload):
         """Acknowledge commands before their unchanged paused readback catches up."""
+        if payload.get("cmd") == next_command == "stopCleaning":
+            return await original(serial, payload)
         if payload.get("cmd") in {"sendToBase", next_command}:
             return {"result": "ok", "data": {}}
         return await original(serial, payload)

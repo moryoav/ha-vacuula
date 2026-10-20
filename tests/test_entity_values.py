@@ -309,7 +309,8 @@ def test_gen4_run_aggregates():
     assert last_value(robot, "last_area") == pytest.approx(3.5)
     assert last_value(robot, "last_pickups") == 1
     assert last_value(robot, "last_battery") == 8
-    assert last_value(robot, "last_status") == "paused"
+    # The final subrun is paused, but this entity describes the whole cleaning.
+    assert last_value(robot, "last_status") == "incomplete"
     assert last_value(robot, "last_started_by") == "schedule"
     assert last_value(robot, "last_duration") == 300
     robot.runs[0]["cleaning_complete"] = True

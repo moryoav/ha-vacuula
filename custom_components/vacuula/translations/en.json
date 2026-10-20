@@ -115,6 +115,9 @@
     "map_cleaning_requires_dock": {
       "message": "Return the robot to its dock before starting mapped cleaning. To clean without no-go lines, deliberately choose whole home without a map."
     },
+    "dock_status_unknown": {
+      "message": "The robot docking status is unknown. Wait for a valid state update before starting Automatic or saved-map cleaning."
+    },
     "ambiguous_map": {
       "message": "Several promoted maps were reported. Choose a map explicitly with the Vacuula clean action, or correct the promoted maps in Vacuula."
     },
@@ -126,6 +129,9 @@
     },
     "invalid_boundary": {
       "message": "The boundary data is invalid for this robot generation."
+    },
+    "duplicate_boundary_ids": {
+      "message": "Each boundary must have a unique ID. No boundaries were changed."
     },
     "confirmation_required": {
       "message": "Factory reset erases robot settings. Set confirm to true only when you intend to reset the robot."

@@ -107,7 +107,7 @@ There is no separate options flow; cleaning defaults are entity controls.
 
 | Robot generation | Status |
 | --- | --- |
-| `neato.gen3` | Implemented from the app protocol. D5 telemetry was checked on real hardware using read-only requests. Hardware command execution has not been validated. |
+| `neato.gen3` | Implemented from the app protocol. D5 telemetry, Start, Pause, Resume and return to base during an active run were verified on real hardware. Map and schedule writes remain fixture-tested. |
 | `neato.gen4` | Implemented and tested with fixtures derived from the app protocol. No Generation 4 hardware validation yet. |
 | Other generations | Not exposed by this integration. |
 

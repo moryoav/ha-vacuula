@@ -189,6 +189,11 @@ map_action:
       selector:
         select:
           options: [promote, use, unuse, demote]
+    confirm_server_restarted:
+      name: Confirm Vacuula was restarted
+      description: Enable only after restarting the Vacuula server to end unknown map requests, when its restart cannot be detected automatically. This clears the request fence; promote or demote must still succeed to resolve recovery.
+      selector:
+        boolean:
 get_data:
   name: Read robot data
   description: Return structured robot data, maps, run history or boundaries for use in scripts. Generation 3 schedules use the robot's UTC clock. Requires a response variable.

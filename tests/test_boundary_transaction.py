@@ -10,7 +10,10 @@ from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.vacuula import async_remove_entry
-from custom_components.vacuula.client import CannotConnect, VacuulaError
+from custom_components.vacuula.client import (
+    CannotConnect,
+    MapRequestRejected,
+)
 from custom_components.vacuula.const import DOMAIN, GEN4
 from custom_components.vacuula.coordinator import VacuulaCoordinator
 from custom_components.vacuula.data import RobotData
@@ -35,6 +38,7 @@ def boundary_coordinator(hass):
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local:81"})
     entry.add_to_hass(hass)
     client = MagicMock()
+    client.async_server_boot_id = AsyncMock(return_value=None)
     client.async_maps = AsyncMock(return_value=[{"id": "map1", "promoted": True}])
     client.async_map_boundaries = AsyncMock(return_value=[])
     client.async_map_action = AsyncMock(return_value={"saved": True})
@@ -58,7 +62,7 @@ async def test_fresh_promoted_map_is_saved_before_upload(boundary_coordinator):
         call.async_maps("robot"),
         call.async_map_boundaries("robot", "map1"),
         call.async_map_action("robot", "map1", "boundaries", BOUNDARIES),
-        call.async_map_action("robot", "map1", "promote"),
+        call.async_map_action("robot", "map1", "promote", None),
         call.async_maps("robot"),
         # The firmware can disable schedule events when the floorplan changes.
         call.async_command("robot", {"ability": "scheduling.show"}),
@@ -80,7 +84,7 @@ async def test_inactive_map_is_saved_without_becoming_active(boundary_coordinato
 async def test_failed_save_does_not_promote_previous_boundaries(boundary_coordinator):
     """Preserve the save failure and never upload the old boundary set."""
     coordinator = boundary_coordinator
-    failure = CannotConnect("Boundary save failed")
+    failure = MapRequestRejected(status=400)
     coordinator.client.async_map_action.side_effect = failure
     with pytest.raises(HomeAssistantError) as caught:
         await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
@@ -99,7 +103,7 @@ async def test_failed_promotion_cannot_be_reported_as_success(boundary_coordinat
     no-go zones the user just edited.
     """
     coordinator = boundary_coordinator
-    failure = VacuulaError("Robot rejected map promotion")
+    failure = MapRequestRejected(status=502)
     coordinator.client.async_map_action.side_effect = [{"saved": True}, failure]
     coordinator.client.async_maps.side_effect = [
         [{"id": "map1", "promoted": True}],
@@ -120,7 +124,7 @@ async def test_failed_promotion_cannot_be_reported_as_success(boundary_coordinat
     assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id)
     assert coordinator.client.async_map_action.await_args_list == [
         call("robot", "map1", "boundaries", BOUNDARIES),
-        call("robot", "map1", "promote"),
+        call("robot", "map1", "promote", None),
     ]
 
 
@@ -366,7 +370,7 @@ async def test_rejected_promotion_distinguishes_unchanged_map_from_saved_boundar
 ):
     """Preserve recovery for new boundaries despite an unchanged active-map flag."""
     coordinator = boundary_coordinator
-    failure = VacuulaError("Robot not connected")
+    failure = MapRequestRejected(status=400)
     coordinator.client.async_map_action.side_effect = (
         failure if operation == "promote" else [{"saved": True}, failure]
     )

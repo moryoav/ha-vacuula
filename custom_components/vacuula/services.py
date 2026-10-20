@@ -379,6 +379,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         "map_action": {
             vol.Required("map_id"): _IDENTIFIER,
             vol.Required("action"): vol.In(["promote", "use", "unuse", "demote"]),
+            vol.Optional("confirm_server_restarted"): bool,
         },
         "get_data": {
             vol.Required("resource"): vol.In(
@@ -549,7 +550,15 @@ def async_setup_services(hass: HomeAssistant) -> None:
             elif action == "map_action":
                 _require_generation(robot, GEN4)
                 result = await coordinator.async_map_operation(
-                    serial, data["map_id"], data["action"], None
+                    serial,
+                    data["map_id"],
+                    data["action"],
+                    None,
+                    **(
+                        {"confirm_server_restarted": True}
+                        if data.get("confirm_server_restarted")
+                        else {}
+                    ),
                 )
             elif action == "factory_reset":
                 _require_generation(robot, GEN4)

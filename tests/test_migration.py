@@ -29,7 +29,7 @@ async def test_old_house_default_becomes_automatic_and_keeps_other_preferences(h
     entry.add_to_hass(hass)
     assert await async_migrate_entry(hass, entry)
     assert entry.version == 1
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     expected = deepcopy(original)
     expected["cleaning_options"]["first"]["category"] = "auto"
     assert dict(entry.options) == expected
@@ -44,7 +44,7 @@ async def test_empty_or_invalid_old_defaults_do_not_break_upgrade(hass, options)
     entry = MockConfigEntry(domain=DOMAIN, options=options, minor_version=1)
     entry.add_to_hass(hass)
     assert await async_migrate_entry(hass, entry)
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     assert dict(entry.options) == options
 
 
@@ -67,3 +67,49 @@ async def test_future_major_version_is_not_downgraded(hass):
     entry.add_to_hass(hass)
     assert not await async_migrate_entry(hass, entry)
     assert entry.version == 2
+
+
+@pytest.mark.parametrize("minor_version", [1, 2])
+async def test_legacy_pending_uploads_gain_unknown_operation_fence(hass, minor_version):
+    """Do not assume an older persisted upload guard describes completed HTTP work."""
+    old = {
+        "pending_map_promotions": {"robot": "map1"},
+        "pending_boundary_sync": {"robot": False},
+        "cleaning_options": {"robot": {"category": "spot", "mode": "turbo"}},
+        "untouched": {"value": 1},
+    }
+    original = deepcopy(old)
+    entry = MockConfigEntry(
+        domain=DOMAIN, version=1, minor_version=minor_version, options=old
+    )
+    entry.add_to_hass(hass)
+    assert await async_migrate_entry(hass, entry)
+    assert entry.minor_version == 3
+    assert entry.options["pending_map_operations"] == {
+        "robot": {"action": "unknown", "map_id": "map1"}
+    }
+    for key, value in original.items():
+        assert entry.options[key] == value
+    assert old == original
+
+
+async def test_migration_keeps_existing_operation_evidence(hass):
+    """Keep existing operation evidence instead of replacing it with a legacy fence."""
+    operation = {
+        "action": "promote",
+        "map_id": "map2",
+        "boot_id": '"111111111111"',
+        "needs_upload": True,
+    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        minor_version=2,
+        options={
+            "pending_map_promotions": {"robot": "map1"},
+            "pending_map_operations": {"robot": deepcopy(operation)},
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await async_migrate_entry(hass, entry)
+    assert entry.options["pending_map_operations"]["robot"] == operation

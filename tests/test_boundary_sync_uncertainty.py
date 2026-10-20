@@ -7,7 +7,7 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.vacuula.client import CannotConnect
+from custom_components.vacuula.client import CannotConnect, MapRequestRejected
 from custom_components.vacuula.const import DOMAIN, GEN4
 from custom_components.vacuula.coordinator import VacuulaCoordinator
 from custom_components.vacuula.data import RobotData
@@ -32,6 +32,7 @@ def uncertain_boundary_setup(hass):
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://test.local"})
     entry.add_to_hass(hass)
     client = MagicMock()
+    client.async_server_boot_id = AsyncMock(return_value=None)
     client.async_maps = AsyncMock(return_value=[{"id": "map1", "promoted": True}])
     client.async_command = AsyncMock(return_value={"body": {}})
     remote = {"saved": [], "uploaded": [], "failure": "boundary_response"}
@@ -46,13 +47,13 @@ def uncertain_boundary_setup(hass):
         assert serial == "robot" and map_id == "map1"
         if action == "boundaries":
             if remote["failure"] == "boundary_rejected":
-                raise CannotConnect("Boundary write rejected before mutation")
+                raise MapRequestRejected(status=400)
             remote["saved"] = deepcopy(payload)
             if remote["failure"] == "boundary_response":
                 raise CannotConnect("Response lost after committed boundary write")
         elif action == "promote":
             if remote["failure"] == "promote_rejected":
-                raise CannotConnect("Robot disconnected before demotion")
+                raise MapRequestRejected(status=400)
             remote["uploaded"] = deepcopy(remote["saved"])
         return {}
 
@@ -68,7 +69,7 @@ def uncertain_boundary_setup(hass):
 async def test_rejected_unchanged_boundary_write_clears_new_guard(
     uncertain_boundary_setup,
 ):
-    """Clear a new guard when fresh reads prove the failed save changed nothing."""
+    """Clear a new guard after a completed rejection and unchanged fresh read."""
     coordinator, remote = uncertain_boundary_setup
     remote["saved"] = deepcopy(BOUNDARIES)
     remote["uploaded"] = deepcopy(BOUNDARIES)
@@ -86,7 +87,8 @@ async def test_rejected_unchanged_save_preserves_previous_boundary_uncertainty(
 ):
     """An unchanged rejected save cannot resolve an earlier unapplied boundary set."""
     coordinator, remote = uncertain_boundary_setup
-    with pytest.raises((CannotConnect, HomeAssistantError)):
+    remote["failure"] = "promote_rejected"
+    with pytest.raises(HomeAssistantError):
         await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
     assert coordinator.has_pending_map_recovery("robot")
     assert remote["saved"] == BOUNDARIES
@@ -111,8 +113,16 @@ async def test_noop_boundary_save_does_not_create_permanent_recovery(
     remote["saved"] = deepcopy(BOUNDARIES)
     remote["uploaded"] = deepcopy(BOUNDARIES)
     remote["failure"] = failure
-    with pytest.raises((CannotConnect, HomeAssistantError)):
+    if failure == "promote_rejected":
+        with pytest.raises(HomeAssistantError):
+            await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
+    else:
+        # A no-op save is skipped, so its hypothetical lost response cannot occur.
         await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
+    assert all(
+        request.args[2] == "promote"
+        for request in coordinator.client.async_map_action.await_args_list
+    )
     assert remote["saved"] == remote["uploaded"] == BOUNDARIES
     assert not coordinator.has_pending_map_recovery("robot")
     await coordinator.async_refresh_maps("robot")
@@ -169,16 +179,22 @@ async def test_successful_promotion_resolves_boundary_sync_uncertainty(
     with pytest.raises((CannotConnect, HomeAssistantError)):
         await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
     remote["failure"] = None
-    await coordinator.async_map_operation("robot", "map1", "promote")
+    # The mock server restart terminates the lost-response handler before retrying.
+    await coordinator.async_map_operation(
+        "robot",
+        "map1",
+        "promote",
+        confirm_server_restarted=failure == "boundary_response",
+    )
     assert remote["uploaded"] == BOUNDARIES
     assert not coordinator.has_pending_map_recovery("robot")
 
 
 @pytest.mark.parametrize("failure", ["boundary_response", "promote_rejected"])
-async def test_external_promotion_resolves_observed_demotion_after_reload(
+async def test_external_promotion_does_not_unfence_an_unknown_handler(
     uncertain_boundary_setup, failure
 ):
-    """Remember demotion across reload and recognize a later external upload."""
+    """Resolve completed uploads externally but keep unknown handlers fenced."""
     coordinator, remote = uncertain_boundary_setup
     remote["failure"] = failure
     with pytest.raises((CannotConnect, HomeAssistantError)):
@@ -196,29 +212,35 @@ async def test_external_promotion_resolves_observed_demotion_after_reload(
     replacement.robots = coordinator.robots
     assert replacement.has_pending_map_recovery("robot")
 
-    # A later promoted flag now establishes an upload after the boundary edit.
+    # An external upload cannot prove a disconnected older handler has finished.
     remote["uploaded"] = deepcopy(remote["saved"])
     coordinator.client.async_maps.return_value = [{"id": "map1", "promoted": True}]
     await replacement.async_refresh_maps("robot")
     assert remote["uploaded"] == BOUNDARIES
-    assert not replacement.has_pending_map_recovery("robot")
+    assert replacement.has_pending_map_recovery("robot") is (
+        failure == "boundary_response"
+    )
     assert coordinator.client.async_map_action.await_count == previous_writes
 
 
 @pytest.mark.parametrize("resolution", ["demote", "map_removed", "robot_removed"])
-async def test_boundary_guard_can_be_abandoned_without_upload(
+async def test_unknown_boundary_handler_requires_restart_before_abandonment(
     uncertain_boundary_setup, resolution
 ):
-    """Let deliberate demotion and resource removal abandon stale boundary edits."""
+    """Require restart for demotion and retain unknown work when its map disappears."""
     coordinator, _remote = uncertain_boundary_setup
     with pytest.raises((CannotConnect, HomeAssistantError)):
         await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
     assert coordinator.has_pending_map_recovery("robot")
     if resolution == "demote":
-        await coordinator.async_map_operation("robot", "map1", "demote")
+        await coordinator.async_map_operation(
+            "robot", "map1", "demote", confirm_server_restarted=True
+        )
     elif resolution == "map_removed":
         coordinator.client.async_maps.return_value = []
         await coordinator.async_refresh_maps("robot")
     else:
         await coordinator._async_snapshot({})
-    assert not coordinator.has_pending_map_recovery("robot")
+    assert coordinator.has_pending_map_recovery("robot") is (
+        resolution == "map_removed"
+    )

@@ -214,6 +214,33 @@ No commands are retried or rolled back automatically. Explicit house
 cleaning/schedules, existing robot schedules and outside controls remain
 available. Unreadable status invalidates the stale promoted-map cache.
 
+These status-based recovery rules apply after a completed handler response.
+Vacuula uses threaded HTTP handlers, and losing or cancelling the client
+connection does not terminate the handler. An unchanged snapshot can precede a
+late boundary commit or demotion; another app can also write matching data
+before that handler finishes. Every Gen4 map write therefore persists an
+operation fence before dispatch. A successful response or an exact recognized
+Vacuula error envelope ends that request fence. A connector failure that proves
+the connection was never established does not introduce a new recovery guard;
+an earlier saved boundary edit still needs its upload. DELETE map requests use
+request middleware to prevent aiohttp's implicit replay after a disconnect,
+without changing Home Assistant's shared session or allowing redirects.
+Generic HTTP errors, lost
+responses and cancellation retain it across entry reloads and prevent further
+map writes, Automatic or mapped starts and mapped schedule changes.
+
+After an ambiguous failure, an uncached `GET /web` reads the frontend's quoted
+12-hex-character ETag, which the reviewed server creates once per process.
+Only a later changed token proves the old process ended. A pre-dispatch token
+would be unsafe if the server restarted before accepting the write, so it is
+never used as that baseline. If the token is unavailable, the administrator can
+assert `confirm_server_restarted: true` on a map action after actually restarting
+Vacuula. A Home Assistant restart alone cannot stop those server handlers.
+Ending the fence permits recovery writes; it does not itself confirm which
+zones reached the robot. A changed active map or an interrupted `unuse` can also
+require a confirmed upload or explicit demotion. Older persisted promotion
+markers migrate conservatively to this unknown-operation state.
+
 The server lists only floorplans marked for use (`in_maps_list`), and new
 floorplans arrive unmarked. As in the app (`map.tsx`), `promote` requires a
 floorplan in the list, and `unuse` is refused for the promoted floorplan;
@@ -264,6 +291,17 @@ confirmed with one fresh state read. This prevents a completed
 promotion or earlier command from being followed by a stale queued target or
 readiness decision. Commands are never retried automatically,
 including after a timeout, because execution might already have occurred.
+Return to base always reads fresh native readiness and sends Home only with
+explicit positive permission, pausing first if the fresh state permits it.
+Gen3 intent waits at most 60 seconds for observed departure, then tracks a trip
+for at most 15 minutes without renewing its deadline on duplicate reports or
+pause/resume. Repeated Home requests do not pause or resend an accepted pending
+or moving trip. Lost acknowledgements preserve observed motion; terminal states,
+explicit new cleaning or cancellation commands, and expiry remove old context.
+State pushes arriving during an HTTP state read are overlaid as field deltas so
+the older response does not erase those updates. Neither channel supplies a
+shared source sequence, so this preserves arrival order rather than claiming
+an ordering of arbitrarily delayed events at the robot.
 Successful commands trigger a state readback. Map writes first read the map
 under the target robot to check ownership. Action schemas validate identifiers,
 names, generations, settings, and geometry before sending a request. Boundary

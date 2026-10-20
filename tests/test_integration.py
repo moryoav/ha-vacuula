@@ -328,7 +328,7 @@ async def test_native_vacuum_services_execute_once_and_confirm_state(hass, loade
         names = [item.get("cmd") or item.get("ability") for item in sent]
         assert names == (
             [state_command, command, state_command]
-            if service == "start"
+            if service in {"start", "return_to_base"}
             else [command, state_command]
         )
         assert (
@@ -372,6 +372,7 @@ async def test_native_button_services_share_confirmed_vacuum_actions(hass, loade
         names = [item.get("cmd") or item.get("ability") for item in commands]
         if action == "return_to_base":
             assert names == [
+                state_command,
                 "pauseCleaning" if gen3 else "cleaning.pause",
                 state_command,
                 expected_command,

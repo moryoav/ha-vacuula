@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from typing import Any
@@ -33,12 +34,26 @@ class CannotConnect(VacuulaError):
     """The connection or server is unavailable."""
 
 
+class MapRequestNotSent(CannotConnect):
+    """A map request failed to establish its connection before HTTP dispatch."""
+
+
 class InvalidAuth(VacuulaError):
     """The server or reverse proxy rejected authentication."""
 
 
 class CommandError(VacuulaError):
     """The server or robot rejected a command."""
+
+
+class MapRequestRejected(CommandError):
+    """A recognized Vacuula map-error reply proves its HTTP handler completed."""
+
+    def __init__(self, *, status: int) -> None:
+        """Retain a status and fixed message without storing server response text."""
+        super().__init__(
+            "Vacuula completed and rejected the map request", status=status
+        )
 
 
 class UnsupportedCommand(CommandError):
@@ -90,6 +105,40 @@ def _robots(value: Any) -> dict[str, dict[str, Any]]:
     if any(not isinstance(v, dict) for v in result.values()):
         raise VacuulaError("Invalid robot list")
     return result
+
+
+def _completed_map_rejection(action: str, status: int, value: Any) -> bool:
+    """Recognize exact endpoint-specific failures from Vacuula's finished handlers.
+
+    A completed rejection may follow demotion, so this does not establish that
+    the old floorplan is still active. Generic proxy failures remain ambiguous.
+    """
+    if not isinstance(value, dict) or set(value) != {"error"}:
+        return False
+    error = value["error"]
+    if not isinstance(error, str):
+        return False
+    if action in {"demote", "delete"}:
+        return status == 400 and error == "Robot not connected"
+    if action == "boundaries":
+        return status == 400 and error in {
+            "not all required keys",
+            "Invalid JSON body",
+            "Invalid Content-Length header",
+        }
+    if action != "promote":
+        return False
+    if status == 400:
+        return error == "Robot not connected"
+    if status == 404:
+        return error == "Map not found"
+    if status == 502:
+        return (
+            error == "Failed to send promote to robot"
+            or re.fullmatch(r"Robot rejected promote \(status [0-9]{3}\)", error)
+            is not None
+        )
+    return status == 504 and error == "Robot did not acknowledge promote in time"
 
 
 def unwrap(response: dict[str, Any]) -> dict[str, Any]:
@@ -200,6 +249,22 @@ class VacuulaClient:
         return bytes(content)
 
     @staticmethod
+    async def _map_delete_no_retry(
+        request: aiohttp.ClientRequest, handler: aiohttp.ClientHandlerType
+    ) -> aiohttp.ClientResponse:
+        """Prevent aiohttp from replaying a map DELETE after uncertain delivery."""
+        try:
+            return await handler(request)
+        except aiohttp.ClientConnectorError:
+            # No connection was established, so callers can safely distinguish
+            # this from a request whose response was lost after dispatch.
+            raise
+        except (aiohttp.ClientOSError, aiohttp.ServerDisconnectedError) as err:
+            # aiohttp retries idempotent HTTP methods after these exceptions.
+            # Demotion commands must be sent once even though they use DELETE.
+            raise CannotConnect("Connection to Vacuula failed") from err
+
+    @staticmethod
     def _raise_status(status: int, *, command: bool = False) -> None:
         """Map HTTP failures to authentication, connectivity or command errors."""
         if status in (401, 403):
@@ -220,6 +285,7 @@ class VacuulaClient:
         payload: Any = None,
         command: bool = False,
         allow_ok: bool = False,
+        map_action: str | None = None,
         timeout: aiohttp.ClientTimeout = REQUEST_TIMEOUT,
     ) -> Any:
         """Execute one bounded request and validate status and response encoding.
@@ -228,12 +294,21 @@ class VacuulaClient:
         when the endpoint explicitly permits it.
         """
         try:
+            # Request middleware replaces the shared session's redirect guard.
+            # Redirects are disabled below, so that guard has no work to do;
+            # the shared connector, headers and session state stay untouched.
+            middlewares = (
+                (self._map_delete_no_retry,)
+                if map_action is not None and method == "DELETE"
+                else None
+            )
             async with self._session.request(
                 method,
                 self._url(*segments),
                 json=payload,
                 timeout=timeout,
                 allow_redirects=False,
+                middlewares=middlewares,
             ) as response:
                 if response.status in (401, 403) or 300 <= response.status < 400:
                     self._raise_status(response.status, command=command)
@@ -245,10 +320,20 @@ class VacuulaClient:
                 except VacuulaError:
                     self._raise_status(response.status, command=command)
                     raise
+                if map_action is not None and _completed_map_rejection(
+                    map_action, response.status, decoded
+                ):
+                    raise MapRequestRejected(status=response.status)
                 if command and isinstance(decoded, dict):
                     self._check_command(decoded, response.status)
                 self._raise_status(response.status, command=command)
                 return decoded
+        except aiohttp.ClientConnectorError as err:
+            if map_action is not None:
+                raise MapRequestNotSent(
+                    "Connection to Vacuula failed before sending the map request"
+                ) from err
+            raise CannotConnect("Connection to Vacuula failed") from err
         except (aiohttp.ClientError, TimeoutError, OSError) as err:
             raise CannotConnect("Connection to Vacuula failed") from err
 
@@ -271,6 +356,30 @@ class VacuulaClient:
     async def async_server_info(self) -> dict[str, Any]:
         """Read the local server metadata as a JSON object."""
         return _object(await self._request("GET", "server"))
+
+    async def async_server_boot_id(self) -> str | None:
+        """Read the frontend's per-process ETag without caching or reading its body.
+
+        Vacuula generates a quoted 12-character hexadecimal token on startup.
+        Missing frontends, proxy responses and network failures leave the boot
+        identity unknown rather than manufacturing evidence of a restart.
+        """
+        try:
+            async with self._session.request(
+                "GET",
+                URL(f"{self.base_url}/web", encoded=True),
+                headers={"Cache-Control": "no-cache"},
+                timeout=REQUEST_TIMEOUT,
+                allow_redirects=False,
+            ) as response:
+                if response.status != 200:
+                    return None
+                etag = response.headers.get("ETag")
+                if isinstance(etag, str) and re.fullmatch(r'"[0-9a-f]{12}"', etag):
+                    return etag
+                return None
+        except aiohttp.ClientError, TimeoutError, OSError:
+            return None
 
     async def async_robots(self) -> dict[str, dict[str, Any]]:
         """Read robot metadata keyed by each server-side serial identifier."""
@@ -362,7 +471,13 @@ class VacuulaClient:
         """Apply a supported map action, allowing the longer promotion timeout."""
         if action in ("demote", "delete"):
             return await self._request(
-                "DELETE", "robot", serial, "maps", map_id, allow_ok=True
+                "DELETE",
+                "robot",
+                serial,
+                "maps",
+                map_id,
+                allow_ok=True,
+                map_action=action,
             )
         if action not in ("promote", "use", "unuse", "boundaries"):
             raise ValueError("Unknown map action")
@@ -375,6 +490,7 @@ class VacuulaClient:
             action,
             payload=payload,
             allow_ok=True,
+            map_action=action,
             timeout=MAP_PROMOTE_TIMEOUT if action == "promote" else REQUEST_TIMEOUT,
         )
 

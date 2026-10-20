@@ -172,6 +172,13 @@ home, the vacuum shows Returning for the trip. Command acceptance does not prove
 docking; the vacuum activity and docked sensor continue to show the reported
 robot state.
 
+Return to base reads fresh state even when cached readiness is positive and
+requires an explicit native Home permission before sending the command. Lost
+acknowledgements do not erase already observed home motion. Gen3 command intent
+waits up to 60 seconds for departure; once movement is observed, its 15-minute
+bound remains absolute through pauses and resumes. Expiry or a confirmed terminal
+state prevents an old trip from labeling a later cleaning run as Returning.
+
 The vacuum's activity distinguishes cleaning and exploration from maintenance.
 Log uploads, software updates, menus and stationary map transfers show docked
 or idle; the Robot action sensor retains the precise phase.
@@ -286,11 +293,12 @@ names the robot and map ID, and new Automatic or mapped starts and mapped
 schedule commands are blocked, so Automatic does not quietly clean without the
 no-go zones you just edited. Promote the map with `vacuula.map_action` to confirm
 that its current boundaries reached the robot. After a boundary edit, an unchanged
-promoted flag cannot confirm this: the robot may still have the old zones. An
-app promotion clears this guard only if the integration observes the demotion
-and subsequent promotion; if the notice remains, use the Home Assistant action.
-Ordinary promotion failures clear when a floorplan is confirmed active again.
-Either marker also clears when you demote the map with
+promoted flag cannot confirm this: the robot may still have the old zones.
+For a request whose handler is known to have finished, an app promotion clears
+this guard only if the integration observes the demotion and subsequent
+promotion; if the notice remains, use the Home Assistant action. Ordinary
+completed promotion failures clear when a floorplan is confirmed active again.
+These markers also clear when you demote the map with
 `vacuula.map_action` to continue without it, when the map is no longer in use,
 or when the robot is removed. Vacuula reports a failed upload and a deliberate
 demotion the same way, so a demotion made only in the Vacuula app does not
@@ -299,6 +307,22 @@ available, and a mapped schedule event can still be turned off, with its switch
 or `vacuula.update_schedule_event`. Existing robot schedules and controls
 outside this integration are not blocked. Robot commands are never retried
 automatically.
+
+If a map request loses its HTTP connection or is cancelled, Vacuula can continue
+processing it. Further map writes are blocked because a late completion could
+undo them. Matching boundaries or an active-map flag cannot identify which
+request finished. Restart the **Vacuula server**, then promote or demote the map
+with `vacuula.map_action`. Restarting Home Assistant alone does not terminate
+Vacuula's handlers. The integration detects a changed server process through
+the app's uncached web ETag. If that identity is unavailable, set
+`confirm_server_restarted: true` on the map action **only after actually restarting
+Vacuula**. This ends the request block; an upload or demotion must still succeed
+to resolve floorplan recovery. If an interrupted `unuse` request hid the map,
+either demote it or run `use` followed by `promote`. Pending markers from older
+integration versions are conservatively treated as unknown requests during
+migration. A recognized completed Vacuula error response does not require this
+extra restart. A connection failure that proves a request was never sent creates
+no new recovery block.
 
 A boundary contains `id`, `name`, `color`, `type` (`polygon` or `polyline`),
 `vertices`, and `enabled`. Values are accepted as the Vacuula app stores them,

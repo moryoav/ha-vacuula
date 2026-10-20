@@ -101,7 +101,7 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure one server, automatically discovering its robots."""
 
     VERSION = 1
-    MINOR_VERSION = 2
+    MINOR_VERSION = 3
 
     def __init__(self) -> None:
         """Initialize discovery candidates, aliases and per-flow DNS results."""

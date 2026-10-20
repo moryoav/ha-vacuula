@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.11
+
+- Kept interrupted Gen4 map requests guarded until their server handlers are known to have ended, including delayed boundary commits, late promotions, reloads and external edits. Added server restart detection and an explicit restart-confirmation fallback; skipped redundant metadata and boundary writes.
+- Confirmed fresh positive Home readiness and refused missing permission before docking. Preserved bounded home intent across delayed movement, pause/resume, lost acknowledgements and cancellation. Avoided duplicate Home commands and cleared old intent when a new task is explicitly selected.
+- Preserved push updates received during an in-flight state read so an older HTTP reply cannot erase newer readiness or activity information.
+- Disabled implicit HTTP retries for map DELETE requests and distinguished unsent connection failures from ambiguous delivery, avoiding false recovery blocks. Removed reconstructed recovery notices when their entry is deleted.
+
+Upgrade note: existing uncertain Gen4 map operations require a confirmed Vacuula server restart before recovery writes, followed by successful promotion or deliberate demotion. Restarting Home Assistant alone cannot stop Vacuula's unfinished requests. Entries without pending recovery markers upgrade normally.
+
 ## 0.1.10
 
 - Confirmed fresh state before Start chooses between resuming and starting a new run, and allowed connected command buttons to reach live readiness validation instead of refusing stale flags.

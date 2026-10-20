@@ -242,6 +242,49 @@ async def test_rest_actions(hass, setup):
         await call(hass, setup, "update_map", map_id="map1", name="Floor", enabled=True)
 
 
+@pytest.mark.parametrize("confirmed", [False, True])
+async def test_map_action_forwards_only_explicit_restart_confirmation(
+    hass, setup, confirmed
+):
+    """Keep restart acknowledgement explicit at the administrator action boundary."""
+    coordinator, robot, _, _ = setup
+    robot.generation = GEN4
+    await call(
+        hass,
+        setup,
+        "map_action",
+        map_id="map1",
+        action="promote",
+        confirm_server_restarted=confirmed,
+    )
+    coordinator.async_map_operation.assert_awaited_once_with(
+        robot.serial,
+        "map1",
+        "promote",
+        None,
+        **({"confirm_server_restarted": True} if confirmed else {}),
+    )
+
+
+@pytest.mark.parametrize("confirmation", ["true", 1, None])
+async def test_map_action_requires_a_boolean_restart_confirmation(
+    hass, setup, confirmation
+):
+    """Reject ambiguous restart assertions before any map request is dispatched."""
+    coordinator, robot, _, _ = setup
+    robot.generation = GEN4
+    with pytest.raises(vol.Invalid):
+        await call(
+            hass,
+            setup,
+            "map_action",
+            map_id="map1",
+            action="promote",
+            confirm_server_restarted=confirmation,
+        )
+    coordinator.async_map_operation.assert_not_awaited()
+
+
 async def test_factory_reset(hass, setup):
     """Require Gen4 and explicit confirmation before sending a factory reset."""
     coordinator, robot, _, _ = setup

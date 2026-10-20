@@ -1,9 +1,14 @@
 """Cached robot data. No robot credentials are needed by the integration."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from time import monotonic
+from typing import Any, Literal
 
 from .const import GEN3
+
+RETURN_PENDING_SECONDS = 60
+RETURN_TRIP_SECONDS = 15 * 60
+type ReturnTripPhase = Literal["pending", "moving", "paused"]
 
 
 @dataclass(slots=True)
@@ -25,18 +30,56 @@ class RobotData:
     # False once the server no longer lists the robot. Its cached data stays so
     # existing entities keep working until the user removes the device.
     listed: bool = True
-    # True after this integration sent a Gen3 robot home, until the robot
-    # leaves the trip. The D5 reports the first part of the trip as
-    # "recovering location" (action 9), the same code it uses while cleaning.
-    returning: bool = False
+    # The D5 uses action 9 both while cleaning and while finding its base.
+    # Keep bounded command intent until motion confirms which activity it is.
+    return_phase: ReturnTripPhase | None = None
+    return_deadline: float = 0
+
+    @property
+    def returning(self) -> bool:
+        """Report observed home motion only while its command context is current."""
+        return self.return_phase == "moving" and monotonic() < self.return_deadline
+
+
+def clear_return_trip(robot: RobotData) -> None:
+    """Discard expired or contradicted home intent without changing robot telemetry."""
+    robot.return_phase = None
+    robot.return_deadline = 0
+
+
+def begin_return_trip(robot: RobotData) -> None:
+    """Allow 60 seconds for Gen3 home motion after a single command is dispatched."""
+    if robot.generation != GEN3:
+        return
+    robot.return_phase = "pending"
+    robot.return_deadline = monotonic() + RETURN_PENDING_SECONDS
 
 
 def track_return_trip(robot: RobotData) -> None:
-    """End a tracked trip home once the robot is no longer driving to its base."""
-    if robot.returning and not (
-        robot.state.get("state") == 2 and robot.state.get("action") in (4, 9)
-    ):
-        robot.returning = False
+    """Track Gen3 home departure, pauses and completion without extending its bound.
+
+    Repeated paused reports during departure do not erase pending intent. Once
+    home motion is observed, its 15-minute deadline remains absolute through
+    subsequent events, polling and pause/resume. Idle, error and unrelated
+    motion end the trip; expiry also prevents stale intent labeling a later run.
+    """
+    phase = robot.return_phase
+    if phase is None:
+        return
+    now = monotonic()
+    state = robot.state.get("state")
+    action = robot.state.get("action")
+    if now >= robot.return_deadline or state not in (2, 3):
+        clear_return_trip(robot)
+    elif state == 2 and action in (4, 9):
+        robot.return_phase = "moving"
+        if phase == "pending":
+            robot.return_deadline = now + RETURN_TRIP_SECONDS
+    elif state == 3:
+        if phase == "moving":
+            robot.return_phase = "paused"
+    elif phase != "pending":
+        clear_return_trip(robot)
 
 
 def event_targets_map(event: dict[str, Any]) -> bool:

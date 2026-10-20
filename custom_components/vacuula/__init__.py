@@ -38,6 +38,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: VacuulaConfigEntry) ->
                 if isinstance(defaults, dict) and defaults.get("category") == "house":
                     defaults["category"] = "auto"
         hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
+    if entry.minor_version < 3:
+        options = deepcopy(dict(entry.options))
+        pending = options.get("pending_map_promotions", {})
+        if pending:
+            operations = dict(options.get("pending_map_operations", {}))
+            for serial, map_id in pending.items():
+                operations.setdefault(serial, {"action": "unknown", "map_id": map_id})
+            options["pending_map_operations"] = operations
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=3)
     return True
 
 
@@ -61,7 +70,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: VacuulaConfigEntry) -> 
 
 async def async_remove_entry(hass: HomeAssistant, entry: VacuulaConfigEntry) -> None:
     """Remove persistent floorplan notices when their server entry is removed."""
-    for serial in entry.options.get("pending_map_promotions", {}):
+    serials = set(entry.options.get("pending_map_promotions", {})) | set(
+        entry.options.get("pending_map_operations", {})
+    )
+    for serial in serials:
         ir.async_delete_issue(hass, DOMAIN, f"{entry.entry_id}_{serial}_map_promotion")
 
 

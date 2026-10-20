@@ -77,15 +77,30 @@ def setup_robot(hass, request):
         },
     )
     coordinator.robots["robot"] = robot
+    paused = False
+    sent_home = False
 
     async def command(serial, payload):
         """Acknowledge commands and expose home readiness after the simulated pause."""
+        nonlocal paused, sent_home
         assert serial == "robot"
         name = payload[names["key"]]
         if name == names["state"]:
             state = deepcopy(robot.state)
-            state[names["commands"]].update({"pause": False, names["home_flag"]: True})
+            if paused:
+                state["state"] = 3 if gen3 else "paused"
+                state[names["commands"]].update(
+                    {"pause": False, names["home_flag"]: True}
+                )
+            if sent_home:
+                state.update(
+                    state=2 if gen3 else "busy", action=4 if gen3 else "docking"
+                )
             return {"data": state} if gen3 else {"code": 200, "body": state}
+        if name == names["pause"]:
+            paused = True
+        elif name == names["home"]:
+            sent_home = True
         return {"result": "ok"} if gen3 else {"code": 200, "body": {}}
 
     client.async_command.side_effect = command
@@ -97,6 +112,12 @@ def command_call(names, action):
     return call("robot", {names["key"]: names[action]})
 
 
+def state_reply(robot):
+    """Wrap a copied current state using its real generation's response envelope."""
+    state = deepcopy(robot.state)
+    return {"data": state} if robot.generation == GEN3 else {"code": 200, "body": state}
+
+
 async def test_active_cleaning_pauses_waits_confirms_then_docks(setup_robot):
     """Pause active cleaning, wait 3.5 seconds, confirm readiness and send home once."""
     coordinator, _robot, client, names = setup_robot
@@ -106,7 +127,8 @@ async def test_active_cleaning_pauses_waits_confirms_then_docks(setup_robot):
         await coordinator.async_return_to_base("robot")
     sleep.assert_awaited_once_with(3.5)
     assert client.async_command.await_args_list == [
-        command_call(names, action) for action in ("pause", "state", "home", "state")
+        command_call(names, action)
+        for action in ("state", "pause", "state", "home", "state")
     ]
     client.async_maps.assert_not_awaited()
     client.async_runs.assert_not_awaited()
@@ -121,7 +143,7 @@ async def test_pause_then_refuses_when_the_d5_has_not_seen_its_base(setup_robot)
     """
     coordinator, robot, client, names = setup_robot
     response = {"data": paused_d5_state()}
-    client.async_command.side_effect = [{}, response]
+    client.async_command.side_effect = [state_reply(robot), {}, response]
     with patch(
         "custom_components.vacuula.coordinator.asyncio.sleep", new_callable=AsyncMock
     ) as sleep:
@@ -130,7 +152,7 @@ async def test_pause_then_refuses_when_the_d5_has_not_seen_its_base(setup_robot)
     sleep.assert_awaited_once_with(3.5)
     assert error.value.translation_key == "base_not_found"
     assert client.async_command.await_args_list == [
-        command_call(names, action) for action in ("pause", "state")
+        command_call(names, action) for action in ("state", "pause", "state")
     ]
     assert not robot.returning
 
@@ -172,6 +194,7 @@ async def test_seen_base_does_not_override_live_d5_home_refusal(
         client.async_command.side_effect = [{"data": deepcopy(observed)}]
     else:
         client.async_command.side_effect = [
+            state_reply(robot),
             {"result": "ok"},
             {"data": deepcopy(observed)},
         ]
@@ -190,7 +213,7 @@ async def test_seen_base_does_not_override_live_d5_home_refusal(
     assert robot.state["state"] == 3
     assert robot.state["availableCommands"]["resume"] is True
     assert not robot.returning
-    expected = ("state",) if already_paused else ("pause", "state")
+    expected = ("state",) if already_paused else ("state", "pause", "state")
     assert client.async_command.await_args_list == [
         command_call(names, action) for action in expected
     ]
@@ -266,7 +289,7 @@ async def test_direct_docking_does_not_pause_or_wait(setup_robot):
         await coordinator.async_return_to_base("robot")
     sleep.assert_not_awaited()
     assert client.async_command.await_args_list == [
-        command_call(names, action) for action in ("home", "state")
+        command_call(names, action) for action in ("state", "home", "state")
     ]
 
 
@@ -287,8 +310,11 @@ async def test_refused_docking_does_not_send_commands(setup_robot):
 
 async def test_pause_failure_never_sends_home(setup_robot):
     """Stop the home transaction immediately when its initial pause fails."""
-    coordinator, _robot, client, names = setup_robot
-    client.async_command.side_effect = VacuulaError("pause failed")
+    coordinator, robot, client, names = setup_robot
+    client.async_command.side_effect = [
+        state_reply(robot),
+        VacuulaError("pause failed"),
+    ]
     with patch(
         "custom_components.vacuula.coordinator.asyncio.sleep", new_callable=AsyncMock
     ) as sleep:
@@ -296,7 +322,9 @@ async def test_pause_failure_never_sends_home(setup_robot):
             await coordinator.async_return_to_base("robot")
     assert error.value.translation_key == "command_failed"
     sleep.assert_not_awaited()
-    assert client.async_command.await_args_list == [command_call(names, "pause")]
+    assert client.async_command.await_args_list == [
+        command_call(names, action) for action in ("state", "pause")
+    ]
 
 
 async def test_fresh_state_still_refuses_docking(setup_robot):
@@ -304,7 +332,7 @@ async def test_fresh_state_still_refuses_docking(setup_robot):
     coordinator, robot, client, names = setup_robot
     state = deepcopy(robot.state)
     state[names["commands"]]["pause"] = False
-    client.async_command.side_effect = [{}, {"data": state}]
+    client.async_command.side_effect = [state_reply(robot), {}, {"data": state}]
     with patch(
         "custom_components.vacuula.coordinator.asyncio.sleep", new_callable=AsyncMock
     ):
@@ -312,14 +340,18 @@ async def test_fresh_state_still_refuses_docking(setup_robot):
             await coordinator.async_return_to_base("robot")
     assert error.value.translation_key == "action_unavailable"
     assert client.async_command.await_args_list == [
-        command_call(names, action) for action in ("pause", "state")
+        command_call(names, action) for action in ("state", "pause", "state")
     ]
 
 
 async def test_failed_state_confirmation_never_sends_home(setup_robot):
     """Keep connection status but send no home command after a failed state read."""
     coordinator, robot, client, names = setup_robot
-    client.async_command.side_effect = [{}, VacuulaError("state failed")]
+    client.async_command.side_effect = [
+        state_reply(robot),
+        {},
+        VacuulaError("state failed"),
+    ]
     with patch(
         "custom_components.vacuula.coordinator.asyncio.sleep", new_callable=AsyncMock
     ):
@@ -329,7 +361,7 @@ async def test_failed_state_confirmation_never_sends_home(setup_robot):
     # The failed read does not mark the robot offline; Vacuula's list decides.
     assert robot.connected
     assert client.async_command.await_args_list == [
-        command_call(names, action) for action in ("pause", "state")
+        command_call(names, action) for action in ("state", "pause", "state")
     ]
 
 
@@ -352,7 +384,7 @@ async def test_home_failure_is_reported_without_retry(setup_robot):
             await coordinator.async_return_to_base("robot")
     assert error.value.translation_key == "command_failed"
     assert client.async_command.await_args_list == [
-        command_call(names, action) for action in ("pause", "state", "home")
+        command_call(names, action) for action in ("state", "pause", "state", "home")
     ]
     assert not _robot.returning
 
@@ -377,7 +409,9 @@ async def test_cancel_during_wait_never_sends_home(setup_robot):
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-    assert client.async_command.await_args_list == [command_call(names, "pause")]
+    assert client.async_command.await_args_list == [
+        command_call(names, action) for action in ("state", "pause")
+    ]
     assert not coordinator._lock("robot").locked()
 
 
@@ -405,13 +439,15 @@ async def test_pause_delay_and_home_are_serialized_against_other_commands(setup_
             )
         )
         await real_sleep(0)
-        assert client.async_command.await_args_list == [command_call(names, "pause")]
+        assert client.async_command.await_args_list == [
+            command_call(names, action) for action in ("state", "pause")
+        ]
         assert not other.done()
         release.set()
         await asyncio.gather(home, other)
     assert client.async_command.await_args_list == [
         command_call(names, action)
-        for action in ("pause", "state", "home", "state", "other")
+        for action in ("state", "pause", "state", "home", "state", "other")
     ]
 
 

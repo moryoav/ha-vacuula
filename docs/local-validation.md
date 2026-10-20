@@ -1,13 +1,13 @@
 # Local validation, 20 October 2026
 
-Integration version: **0.1.10**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. During the review, the live HACS installation was **0.1.8**; revised controls were tested directly from source.
+Integration version: **0.1.11**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. During the follow-up review, the live HACS installation was **0.1.10**. That review used fixtures and loopback HTTP servers; it did not deploy the new changes or move the robot.
 
 ## Automated checks
 
-- **779 tests passed**, including 49 additional cases covering fresh Start selection, callable controls, terminal home states, device metadata, boundary write uncertainty and recovery across reloads. Existing real Home Assistant platform loading, discovery, scheduling, concurrency, protocol and lifecycle tests also passed.
-- **99.57% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
+- **935 tests passed**, including 156 additional cases since the released 0.1.10 suite. These cover unfinished map handlers, server restart evidence, external map changes, unsent requests, implicit DELETE retries, fresh Home permission, bounded and repeated Home intent, state-read/event races, migration and notice cleanup. Existing real Home Assistant platform loading, discovery, scheduling, concurrency, protocol and lifecycle tests also passed.
+- **99.48% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 21 integration and tool modules.
-- **100% docstring coverage: 854/854 items in 60 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
+- **100% docstring coverage: 995/995 items in 69 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
 - Actionlint: **passed**, GitHub workflow syntax and expressions validated.
@@ -317,6 +317,58 @@ battery and no error. Charging was not active at that read.
 No firmware, reset, provisioning, schedule, preference or boundary writes were
 performed on the real robot during this review. Gen4 map failure paths remain
 verified against server source and simulated transactions, without Gen4 hardware.
+
+## Follow-up review of 0.1.10
+
+Reviewed released commit `c1e9a801a8b76421e079d37ac17ba72cf2657aeb`, with
+independent control, map, transport and state-update reviews. Real loopback HTTP
+failures reproduced these map races before the coordinator fixes:
+
+- Vacuula's threaded boundary handler can continue after the client disconnects.
+  A fresh unchanged boundary read can precede that later commit. The old guard
+  could clear even though the robot never received the committed zones.
+- An interrupted promotion can leave the previous map looking active before its
+  handler demotes it. A later request could overlap that handler and be undone.
+  External matching values or observed app promotions cannot identify which
+  writer finished. Unknown requests now remain fenced across reloads until a
+  later server process is observed or its actual restart is explicitly confirmed.
+- A formerly inactive map can become active through the app before a delayed
+  boundary save finishes. An interrupted `unuse` can hide an active floorplan.
+  Restart recovery now keeps the appropriate upload guard, refreshes consequential
+  metadata after the boot evidence, and prevents conflicting writes to another
+  map during existing recovery. Confirming that the old handler stopped does
+  not by itself confirm which zones reached the robot.
+
+Known completed Vacuula rejections remain distinct from unknown delivery.
+Connection setup failures that prove a request was not sent introduce no new
+guard; an earlier saved boundary change still requires its upload. Real aiohttp
+transport tests also found and fixed its implicit DELETE retry after a lost
+reply. A dropped map DELETE now dispatches once. Persistent notices reconstructed
+from a pre-dispatch operation record are removed with the entry too, and notices
+retain the original guarded map ID during an uncertain alternate-map request.
+
+Home readiness tests showed that stale positive or missing flags could bypass
+the old fallback. Home now always starts with fresh state and requires explicit
+permission after any pause. Lost acknowledgements and repeated paused reports
+no longer erase observed or pending Gen3 departure. Pending intent expires after
+60 seconds; observed travel has a fixed 15-minute bound through pause/resume.
+Repeated Home requests do not resend or interrupt an accepted trip. Explicit
+new tasks clear older unobserved intent, and a rejected new Home preserves an
+already paused trip. Cancellation still schedules only a state read, never a
+motion retry.
+
+Both generations also lost newer push updates when an older in-flight HTTP state
+read completed. Received state deltas now overlay that reply, preserving unrelated
+fresh fields and cleaning up on failure or cancellation. The protocol has no
+shared source sequence, so this follows arrival order rather than establishing
+the robot's ordering of arbitrarily delayed messages.
+
+The complete suite and all automated checks listed above passed. A read-only
+check of the installed 0.1.10 integration confirmed the D5
+idle and docked, 98% battery, with no reported error. No movement, preferences,
+schedules, map changes or other writes were sent to the physical robot during
+this follow-up review. Gen4 remains source-verified and simulated, without Gen4
+hardware. The Vacuula app was not modified.
 
 ## Quality target
 

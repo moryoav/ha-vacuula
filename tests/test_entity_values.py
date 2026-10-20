@@ -416,6 +416,12 @@ async def test_vacuum_guards_defaults_and_activity(coordinator):
         robot.state.update(state=state, action=action)
         assert vacuum.activity == expected
     robot.state["availableCommands"] = {"start": False}
+
+    async def command(serial, build, **kwargs):
+        """Execute the deferred readiness guard against this test's current state."""
+        return build(coordinator.robots[serial])
+
+    coordinator.async_command.side_effect = command
     with pytest.raises(ServiceValidationError):
         await vacuum.async_start()
     with pytest.raises(ServiceValidationError):

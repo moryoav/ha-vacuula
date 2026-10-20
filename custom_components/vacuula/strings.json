@@ -86,10 +86,10 @@
       "message": "No enabled or promoted saved map is available. Enable or promote a map in Vacuula, or deliberately choose whole home without a map."
     },
     "map_promotion_required": {
-      "message": "The last floorplan upload was not confirmed, so the robot may have no active floorplan or no-go protection. Promote the floorplan again in Vacuula or with the Vacuula map action, or demote it with the map action to continue without it. Explicit whole-home cleaning remains available."
+      "message": "The last floorplan or boundary upload was not confirmed. The robot may still use old zones or have no active floorplan. Promote it with the Vacuula map action to confirm recovery, or demote it with that action to continue without it. Explicit whole-home cleaning remains available."
     },
     "map_promotion_failed": {
-      "message": "Floorplan promotion was not confirmed. Any boundary edits may already be saved, and Vacuula may have removed the active floorplan and its no-go protection. Automatic and mapped cleaning stay blocked until the floorplan is promoted again, or demoted with the Vacuula map action."
+      "message": "The floorplan or boundary upload was not confirmed. Boundary edits may already be saved while the robot still uses old zones, or Vacuula may have removed the active floorplan. Check Repairs for recovery status. Promote with the Vacuula map action to confirm recovery, or demote with that action to continue without the floorplan."
     },
     "map_not_in_use": {
       "message": "This floorplan is not marked for use. Mark it first with the Vacuula map action (action: use), as the Vacuula app requires."
@@ -131,7 +131,7 @@
   "issues": {
     "map_promotion_required": {
       "title": "Floorplan upload not confirmed for {robot}",
-      "description": "The last floorplan upload for {robot} (map `{map_id}`) was not confirmed. Vacuula demotes the active floorplan before uploading its replacement, so the robot may be left without an active floorplan and its no-go zones.\n\nTo restore it, promote the floorplan again in the Vacuula app, or run `vacuula.map_action` with this map ID and `action: promote`. To continue without it, run `vacuula.map_action` with `action: demote`. This notice clears once a floorplan is active again, the map is demoted with the action or no longer in use, or the robot is removed.\n\nUntil then, Automatic and mapped starts and mapped schedule changes from Home Assistant are blocked. Explicit whole-home cleaning remains available, and mapped schedule events can still be turned off. The integration does not retry robot commands automatically. Existing robot schedules and controls outside Home Assistant are not blocked."
+      "description": "The last floorplan or boundary upload for {robot} (map `{map_id}`) was not confirmed. The robot may still use old zones, or Vacuula may have removed the active floorplan before uploading its replacement.\n\nRun `vacuula.map_action` with this map ID and `action: promote` to confirm recovery. After a boundary edit, an unchanged promoted flag cannot prove the edited zones reached the robot. A promotion in the app clears this uncertainty only when the integration observes the demotion and subsequent promotion; otherwise use the Home Assistant action. To continue without this floorplan, run the action with `action: demote`. The notice also clears when another floorplan becomes active, the map is no longer in use, or the robot is removed.\n\nUntil then, Automatic and mapped starts and mapped schedule changes from Home Assistant are blocked. Explicit whole-home cleaning remains available, and mapped schedule events can still be turned off. The integration does not retry robot commands automatically. Existing robot schedules and controls outside Home Assistant are not blocked."
     }
   },
   "entity": {

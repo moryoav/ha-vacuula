@@ -38,8 +38,12 @@ def coordinator(hass):
     )
     coordinator.dispatched_command = AsyncMock(return_value={})
 
-    async def command(serial, payload, *, refresh_maps=False, **kwargs):
+    async def command(
+        serial, payload, *, refresh_maps=False, refresh_state=False, **kwargs
+    ):
         """Resolve fresh map state and deferred payloads before recording commands."""
+        if callable(refresh_maps):
+            refresh_maps = refresh_maps(coordinator.robots[serial])
         if refresh_maps:
             await coordinator.async_refresh_maps(serial)
         if callable(payload):
@@ -111,9 +115,7 @@ async def test_default_start_refreshes_maps_and_preserves_no_go_lines(
                 }
             ],
         }
-    coordinator.dispatched_command.assert_awaited_once_with(
-        "robot", expected, require_map_recovery=True
-    )
+    coordinator.dispatched_command.assert_awaited_once_with("robot", expected)
 
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
@@ -128,9 +130,7 @@ async def test_automatic_start_button_falls_back_when_not_docked(
     assert button.available
     await button.async_press()
     payload = coordinator.dispatched_command.await_args.args[1]
-    assert coordinator.dispatched_command.await_args.kwargs == {
-        "require_map_recovery": True
-    }
+    assert coordinator.dispatched_command.await_args.kwargs == {}
     if generation == GEN3:
         assert payload["params"]["category"] == 2
     else:
@@ -183,9 +183,7 @@ async def test_automatic_start_falls_back_without_active_map(
     assert button.available
     await button.async_press()
     payload = coordinator.dispatched_command.await_args.args[1]
-    assert coordinator.dispatched_command.await_args.kwargs == {
-        "require_map_recovery": True
-    }
+    assert coordinator.dispatched_command.await_args.kwargs == {}
     if generation == GEN3:
         assert payload["params"]["category"] == 2
     else:
@@ -246,9 +244,7 @@ async def test_explicit_house_is_deliberate_mapless_cleaning(coordinator, genera
     await VacuulaVacuum(coordinator, "robot").async_start()
     coordinator.async_refresh_maps.assert_not_awaited()
     payload = coordinator.dispatched_command.await_args.args[1]
-    assert coordinator.dispatched_command.await_args.kwargs == {
-        "require_map_recovery": False
-    }
+    assert coordinator.dispatched_command.await_args.kwargs == {}
     if generation == GEN3:
         assert payload["params"]["category"] == 2
     else:
@@ -302,7 +298,6 @@ async def test_explicit_spot_preserves_size_and_does_not_use_a_map(coordinator):
                 "spotHeight": 150,
             },
         },
-        require_map_recovery=False,
     )
 
 
@@ -377,9 +372,9 @@ async def test_return_home_button_remains_available_while_pause_is_possible(
         call("robot"),
     ]
     flags["pause"] = False
-    assert not button.available
-    with pytest.raises(ServiceValidationError):
-        await button.async_press()
+    assert button.available
+    await button.async_press()
+    assert coordinator.async_return_to_base.await_count == 3
 
 
 @pytest.mark.parametrize(

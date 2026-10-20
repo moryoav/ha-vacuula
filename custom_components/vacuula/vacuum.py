@@ -260,18 +260,15 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
 
     async def async_start(self) -> None:
         """Resume a paused run or start cleaning with the configured map policy."""
-        if self.command_allowed("resume", "resume") is True:
-            await self._command("resumeCleaning", "cleaning.resume", "resume")
-            return
-        if self.command_allowed("start", "start") is False:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="action_unavailable"
-            )
 
         def build_command(robot: RobotData) -> dict[str, Any]:
-            # Another queued control may have started a run while this action
-            # waited. Do not send a second start using its previous readiness.
-            """Recheck start readiness and targets after queued map changes."""
+            """Select resume or a new run from state confirmed under the lock."""
+            if self.command_allowed("resume", "resume") is True:
+                return (
+                    {"cmd": "resumeCleaning"}
+                    if robot.generation == GEN3
+                    else {"ability": "cleaning.resume"}
+                )
             if self.command_allowed("start", "start") is False:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN, translation_key="action_unavailable"
@@ -284,8 +281,11 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         await self.coordinator.async_command(
             self.serial,
             build_command,
-            require_map_recovery=category in {"auto", "map"},
-            refresh_maps=category not in {"house", "spot"},
+            refresh_state=True,
+            refresh_maps=lambda robot: (
+                self.command_allowed("resume", "resume") is not True
+                and category not in {"house", "spot"}
+            ),
         )
 
     async def async_stop(self, **kwargs: Any) -> None:
@@ -309,10 +309,6 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         if self.robot.generation != GEN3 or not self.robot.capabilities.get(
             "spotCleaning"
         ):
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="action_unavailable"
-            )
-        if self.command_allowed("start", "start") is False:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="action_unavailable"
             )

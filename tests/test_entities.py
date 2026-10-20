@@ -390,8 +390,12 @@ async def test_robot_settings_confirmed_by_readback(hass, loaded):
 
 
 async def test_push_offline_readiness_and_new_robot(hass, loaded):
-    """Apply readiness and connectivity updates and discover a later robot once."""
-    entry, _client, states = loaded
+    """Recheck callable controls live, expose readiness and discover robots once."""
+    entry, client, states = loaded
+    readiness = eid(hass, "binary_sensor", "robot3", "can_stop")
+    er.async_get(hass).async_update_entity(readiness, disabled_by=None)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
     coordinator = entry.runtime_data
     robot = coordinator.robots["robot3"]
     # The refusal is confirmed with a fresh read, so the robot must agree.
@@ -399,17 +403,24 @@ async def test_push_offline_readiness_and_new_robot(hass, loaded):
     robot.state["availableCommands"]["stop"] = False
     coordinator.async_set_updated_data(coordinator.robots)
     await hass.async_block_till_done()
+    stop_button = eid(hass, "button", "robot3", "button_stop")
+    assert hass.states.get(stop_button).state == "unknown"
+    assert hass.states.get(readiness).state == "off"
+    client.async_command.reset_mock()
+    for domain, action, entity in (
+        ("vacuum", "stop", eid(hass, "vacuum", "robot3", "vacuum")),
+        ("button", "press", stop_button),
+    ):
+        with pytest.raises(ServiceValidationError) as error:
+            await hass.services.async_call(
+                domain, action, {"entity_id": entity}, blocking=True
+            )
+        assert error.value.translation_key == "action_unavailable"
+    # Both controls confirm the refusal without sending a physical stop command.
     assert (
-        hass.states.get(eid(hass, "button", "robot3", "button_stop")).state
-        == "unavailable"
+        client.async_command.await_args_list
+        == [call("robot3", {"cmd": "getRobotState"})] * 2
     )
-    with pytest.raises(ServiceValidationError):
-        await hass.services.async_call(
-            "vacuum",
-            "stop",
-            {"entity_id": eid(hass, "vacuum", "robot3", "vacuum")},
-            blocking=True,
-        )
     robot.connected = False
     coordinator.async_set_updated_data(coordinator.robots)
     await hass.async_block_till_done()
@@ -420,6 +431,8 @@ async def test_push_offline_readiness_and_new_robot(hass, loaded):
     assert (
         hass.states.get(eid(hass, "vacuum", "robot3", "vacuum")).state == "unavailable"
     )
+    assert hass.states.get(stop_button).state == "unavailable"
+    assert hass.states.get(readiness).state == "unavailable"
     coordinator.robots["later"] = RobotData(
         "later", "Later robot", GEN3, connected=True, state=state3()
     )

@@ -179,13 +179,13 @@ async def test_disconnect_during_map_read_does_not_send_a_clean_command(coordina
     with pytest.raises(HomeAssistantError) as error:
         await VacuulaVacuum(coordinator, "robot").async_start()
     assert error.value.translation_key == "offline"
-    coordinator.client.async_command.assert_not_awaited()
+    assert sent_payloads(coordinator) == [{"ability": "state.show"}]
 
 
 @pytest.mark.parametrize("action", ["pause", "stop", "resume"])
 @pytest.mark.parametrize("platform", ["vacuum", "button"])
 async def test_queued_native_controls_recheck_readiness(coordinator, action, platform):
-    """Reject queued vacuum and button actions whose readiness flag changed."""
+    """Recheck queued controls and let Start choose the now-available new run."""
     robot = coordinator.robots["robot"]
     answer_state_reads(coordinator)
     flag = "cancel" if action == "stop" else action
@@ -204,6 +204,10 @@ async def test_queued_native_controls_recheck_readiness(coordinator, action, pla
     await asyncio.sleep(0)
     robot.state["available_commands"][flag] = False
     lock.release()
+    if platform == "vacuum" and action == "resume":
+        await task
+        assert sent_payloads(coordinator)[1]["ability"] == "cleaning.start"
+        return
     with pytest.raises(ServiceValidationError) as error:
         await task
     assert error.value.translation_key == "action_unavailable"

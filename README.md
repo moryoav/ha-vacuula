@@ -164,7 +164,9 @@ If the robot still reports that it cannot go home (`goToBase` false), the run
 stays paused and the action reports an error; the Vacuula app also disables its
 home button for a paused robot in that state. A D5 reports this when it has not
 seen its base during the run, for example after starting away from the dock or
-after a stop; sending it home anyway ends the run where it stands. Let it clean
+after a stop. It can also keep refusing after a short paused and resumed run,
+even with `dockHasBeenSeen: true`; sending it home anyway can end the run where
+it stands. Let it clean
 until it passes its base, or carry it back. After Home Assistant sends a D5
 home, the vacuum shows Returning for the trip. Command acceptance does not prove
 docking; the vacuum activity and docked sensor continue to show the reported
@@ -279,11 +281,16 @@ The robot firmware may also disable schedule events affected by a map change
 (the Vacuula app warns about this), so the integration re-reads the schedule
 after each promotion and the event switches show the result.
 
-After a failed upload the integration keeps a recovery marker: a Repairs notice
+After an uncertain upload or active boundary save the integration keeps a recovery marker: a Repairs notice
 names the robot and map ID, and new Automatic or mapped starts and mapped
 schedule commands are blocked, so Automatic does not quietly clean without the
-no-go zones you just edited. The marker clears when a floorplan is active again
-(promoted here or in the Vacuula app), when you demote the map with
+no-go zones you just edited. Promote the map with `vacuula.map_action` to confirm
+that its current boundaries reached the robot. After a boundary edit, an unchanged
+promoted flag cannot confirm this: the robot may still have the old zones. An
+app promotion clears this guard only if the integration observes the demotion
+and subsequent promotion; if the notice remains, use the Home Assistant action.
+Ordinary promotion failures clear when a floorplan is confirmed active again.
+Either marker also clears when you demote the map with
 `vacuula.map_action` to continue without it, when the map is no longer in use,
 or when the robot is removed. Vacuula reports a failed upload and a deliberate
 demotion the same way, so a demotion made only in the Vacuula app does not
@@ -372,10 +379,13 @@ Robot commands are serialized per robot and sent once. Map selection and native
 command-readiness checks happen inside the same lock as execution, so a queued
 action is checked again when it executes. The robot does not announce every
 readiness change: pause becomes available a few seconds after it leaves the
-dock without a new event. Pause, Stop and Return to base requests refused
-because of cached readiness are therefore checked once more against a fresh
-state read. The state is also read again 10 seconds after the robot starts
-driving, whoever started it, which updates the buttons and readiness sensors.
+dock without a new event. Start confirms fresh state before choosing between
+resuming the existing run and starting a new one. Other requests refused because
+of cached readiness are checked once more against a fresh state read. Supported
+command buttons remain available while the robot is connected; execution checks
+the robot's readiness and reports a refusal when the action cannot run. The
+readiness sensors show the reported flags. The state is also read again 10
+seconds after the robot starts driving, whoever started it.
 A timeout does not prove
 that the robot ignored a command, so commands are never automatically retried.
 After a successful command, the integration reads state back from the robot.

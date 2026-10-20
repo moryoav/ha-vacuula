@@ -1,13 +1,13 @@
 # Local validation, 20 October 2026
 
-Integration version: **0.1.9**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.10**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. During the review, the live HACS installation was **0.1.8**; revised controls were tested directly from source.
 
 ## Automated checks
 
-- **730 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery, docstring enforcement and the protocol/state regressions below.
-- **99.65% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.56%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
+- **779 tests passed**, including 49 additional cases covering fresh Start selection, callable controls, terminal home states, device metadata, boundary write uncertainty and recovery across reloads. Existing real Home Assistant platform loading, discovery, scheduling, concurrency, protocol and lifecycle tests also passed.
+- **99.57% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 21 integration and tool modules.
-- **100% docstring coverage: 817/817 items in 56 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
+- **100% docstring coverage: 854/854 items in 60 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
 - Actionlint: **passed**, GitHub workflow syntax and expressions validated.
@@ -271,6 +271,52 @@ names stay while the map list is unknown; a mapped Gen4 schedule event can be
 turned off, but not switched on, during floorplan recovery; and errors for
 unknown event IDs, whole-home cleaning with a map and off-step reminder values
 name the actual problem.
+
+## Full review after 0.1.9
+
+Reviewed commit `820cec096709fd4fd2fee6618a3ffd2527a52741` from setup and
+transport through coordinator lifecycle, entity updates, controls, schedules,
+map operations, diagnostics and failure recovery. Protocol behavior was checked
+against the local Vacuula 1.0.0 source. Independent review passes and failing
+regression cases confirmed these defects:
+
+- Cached Start and spot guards could bypass the fresh-read fallback. Start also
+  chose Resume before acquiring the command lock. Start now confirms state and
+  chooses the operation under that lock, reading maps only for a new mapped run.
+  Supported command buttons remain callable while connected; execution validates
+  readiness, while readiness sensors retain the robot's reported flags.
+- An active Gen4 boundary save could commit before its response was lost, or
+  remain stored after promotion was refused before demotion. An unchanged
+  promoted flag then authorized cleaning with the robot's previous zones.
+  Recovery now distinguishes these edits from ordinary promotion uncertainty,
+  persists before the save, and survives reloads and failed alternate-map
+  promotions. Unchanged rejected saves clear only their own new guard. Recovery
+  tests cover acknowledged uploads, observed app demotion and re-promotion,
+  deliberate abandonment, removal, lost reads and cancellation.
+- An acknowledged Gen3 home command could restore its returning marker after a
+  fresh terminal state had cleared it. Terminal states now keep it cleared,
+  while a briefly unchanged paused readback retains intent until movement.
+- Later successful robot-info reads did not update device registry firmware.
+  Confirmed model and firmware changes now update the registry without changing
+  user names or creating entities.
+
+The revised source was exercised directly against the D5, leaving the HACS
+installation unchanged. Start, Pause, Resume through Start, and fresh state
+readbacks worked. A return request paused the resumed run, but the robot still
+reported `goToBase: false` with `dockHasBeenSeen: true`, no error and Resume
+available. The revised integration refused the home command and left it paused.
+One direct app-protocol `sendToBase` request in that same state returned `ok`
+and ended the run idle off dock. This confirms that the seen-base flag alone
+cannot safely override a native home refusal. Regression cases now replay this
+sequence for vacuum and button actions. Successful docking was not established
+in this run; the robot required a manual return to its dock.
+
+After the manual return, a fresh robot read confirmed idle and docked, 98%
+battery and no error. Charging was not active at that read.
+
+No firmware, reset, provisioning, schedule, preference or boundary writes were
+performed on the real robot during this review. Gen4 map failure paths remain
+verified against server source and simulated transactions, without Gen4 hardware.
 
 ## Quality target
 

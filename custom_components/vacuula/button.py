@@ -75,32 +75,10 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Check connection, firmware readiness and action-specific prerequisites."""
+        """Keep supported actions callable so stale readiness can be checked live."""
         if self.key == "refresh":
             return self.coordinator.last_update_success
-        if not super().available:
-            return False
-        if self.key == "return_to_base":
-            return (
-                self.command_allowed("goToBase", "return_to_base") is not False
-                or self.command_allowed("pause", "pause") is True
-            )
-        if self.key in COMMANDS:
-            _cmd, _ability, gen3_flag, gen4_flag = COMMANDS[self.key]
-            return (
-                gen3_flag is None
-                or self.command_allowed(gen3_flag, gen4_flag or gen3_flag) is not False
-            )
-        if self.key in ("start", "clean_spot"):
-            return self.command_allowed("start", "start") is not False or (
-                self.key == "start" and self.command_allowed("resume", "resume") is True
-            )
-        if self.key == "explore":
-            return (
-                self.detail("isDocked", "is_docked") is True
-                and self.command_allowed("start", "start") is not False
-            )
-        return True
+        return super().available
 
     async def async_press(self) -> None:
         """Run the selected control through validated coordinator actions."""
@@ -131,7 +109,10 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
 
             def build_command(robot: RobotData) -> dict[str, Any]:
                 """Recheck exploration readiness under the robot command lock."""
-                if not self.available:
+                if (
+                    self.detail("isDocked", "is_docked") is not True
+                    or self.command_allowed("start", "start") is False
+                ):
                     raise ServiceValidationError(
                         translation_domain=DOMAIN, translation_key="action_unavailable"
                     )

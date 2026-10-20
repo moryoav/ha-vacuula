@@ -324,7 +324,13 @@ async def test_native_vacuum_services_execute_once_and_confirm_state(hass, loade
         )
         await hass.async_block_till_done()
         sent = [call.args[1] for call in server.client.async_command.await_args_list]
-        assert (sent[0].get("cmd") or sent[0].get("ability")) == command
+        state_command = "getRobotState" if generation == GEN3 else "state.show"
+        names = [item.get("cmd") or item.get("ability") for item in sent]
+        assert names == (
+            [state_command, command, state_command]
+            if service == "start"
+            else [command, state_command]
+        )
         assert (
             sum((item.get("cmd") or item.get("ability")) == command for item in sent)
             == 1
@@ -362,14 +368,19 @@ async def test_native_button_services_share_confirmed_vacuum_actions(hass, loade
         commands = [
             call.args[1] for call in server.client.async_command.await_args_list
         ]
+        state_command = "getRobotState" if gen3 else "state.show"
+        names = [item.get("cmd") or item.get("ability") for item in commands]
         if action == "return_to_base":
-            assert (commands[0].get("cmd") or commands[0].get("ability")) == (
-                "pauseCleaning" if gen3 else "cleaning.pause"
-            )
+            assert names == [
+                "pauseCleaning" if gen3 else "cleaning.pause",
+                state_command,
+                expected_command,
+                state_command,
+            ]
+        elif action == "start":
+            assert names == [state_command, expected_command, state_command]
         else:
-            assert (
-                commands[0].get("cmd") or commands[0].get("ability")
-            ) == expected_command
+            assert names == [expected_command, state_command]
         assert (
             sum(
                 (item.get("cmd") or item.get("ability")) == expected_command
@@ -509,7 +520,7 @@ async def test_offline_robot_keeps_cached_map_and_refresh_action(hass, loaded):
 
 
 async def test_push_readiness_blocks_start_and_routes_resume(hass, loaded):
-    """Enforce pushed readiness flags and resume an existing run through Start."""
+    """Confirm pushed refusals live and route Start to the confirmed resumable run."""
     entry, server, generation = loaded
     coordinator = entry.runtime_data
     gen3 = generation == GEN3
@@ -524,29 +535,42 @@ async def test_push_readiness_blocks_start_and_routes_resume(hass, loaded):
             else {"data": {"to": {"service": "peer.state"}, "body": state}}
         )
 
+    server.state["TEST-robot"][key].update(partial[key])
     coordinator._handle_event("TEST-robot", event(partial))
     await hass.async_block_till_done()
     assert (
         hass.states.get(entity_id(hass, "button", "button_start")).state
-        == "unavailable"
+        != "unavailable"
     )
+    assert coordinator.robots["TEST-robot"].state[key]["start"] is False
     commands = server.client.async_command.await_count
     vacuum = entity_id(hass, "vacuum", "vacuum")
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(
             "vacuum", "start", {"entity_id": vacuum}, blocking=True
         )
-    assert server.client.async_command.await_count == commands
+    refused = [
+        call.args[1] for call in server.client.async_command.await_args_list[commands:]
+    ]
+    state_command = {"cmd": "getRobotState"} if gen3 else {"ability": "state.show"}
+    assert refused
+    assert all(command == state_command for command in refused)
     partial[key]["resume"] = True
+    server.state["TEST-robot"][key].update(partial[key])
     coordinator._handle_event("TEST-robot", event(partial))
     await hass.async_block_till_done()
+    commands = server.client.async_command.await_count
     await hass.services.async_call(
         "vacuum", "start", {"entity_id": vacuum}, blocking=True
     )
-    first = server.client.async_command.await_args_list[commands].args[1]
-    assert first == (
-        {"cmd": "resumeCleaning"} if gen3 else {"ability": "cleaning.resume"}
-    )
+    resumed = [
+        call.args[1] for call in server.client.async_command.await_args_list[commands:]
+    ]
+    assert resumed == [
+        state_command,
+        {"cmd": "resumeCleaning"} if gen3 else {"ability": "cleaning.resume"},
+        state_command,
+    ]
 
 
 async def test_late_robot_and_telemetry_add_once(hass, loaded):

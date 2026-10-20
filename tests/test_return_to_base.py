@@ -34,6 +34,19 @@ def paused_d5_state():
     }
 
 
+@pytest.fixture
+def paused_d5_after_resume():
+    """Replay the D5's paused reply after Resume, with a seen but unavailable base.
+
+    A direct sendToBase in this observed state returned OK but ended the run
+    idle off the dock. The seen-base flag does not authorize overriding the
+    robot's explicit goToBase refusal.
+    """
+    state = paused_d5_state()
+    state["details"]["dockHasBeenSeen"] = True
+    return state
+
+
 @pytest.fixture(params=[GEN3, GEN4])
 def setup_robot(hass, request):
     """Provide either generation with pausable cleaning and a confirming state mock."""
@@ -125,7 +138,7 @@ async def test_pause_then_refuses_when_the_d5_has_not_seen_its_base(setup_robot)
 @pytest.mark.parametrize("setup_robot", [GEN3], indirect=True)
 @pytest.mark.parametrize("platform", ["vacuum", "button"])
 async def test_already_paused_d5_without_base_cannot_return_home(setup_robot, platform):
-    """Keep the sensor, button and action consistent with the robot's own flag."""
+    """Keep the readiness sensor and live action refusal faithful to the robot."""
     coordinator, robot, client, names = setup_robot
     robot.state = paused_d5_state()
     description = next(
@@ -133,20 +146,58 @@ async def test_already_paused_d5_without_base_cannot_return_home(setup_robot, pl
     )
     assert binary_value(robot, description) is False
     button = VacuulaButton(coordinator, "robot", "return_to_base")
-    assert not button.available
+    assert button.available
     client.async_command.side_effect = [{"data": paused_d5_state()}]
     with pytest.raises(ServiceValidationError) as error:
         if platform == "button":
             await button.async_press()
         else:
             await VacuulaVacuum(coordinator, "robot").async_return_to_base()
-    if platform == "button":
-        assert error.value.translation_key == "action_unavailable"
-        client.async_command.assert_not_awaited()
+    # The refusal is confirmed against a fresh read before it is reported.
+    assert error.value.translation_key == "base_not_found"
+    assert client.async_command.await_args_list == [command_call(names, "state")]
+
+
+@pytest.mark.parametrize("setup_robot", [GEN3], indirect=True)
+@pytest.mark.parametrize("platform", ["vacuum", "button"])
+@pytest.mark.parametrize("already_paused", [False, True])
+async def test_seen_base_does_not_override_live_d5_home_refusal(
+    setup_robot, paused_d5_after_resume, platform, already_paused
+):
+    """Keep the run resumable when home is refused despite having seen the base."""
+    coordinator, robot, client, names = setup_robot
+    observed = deepcopy(paused_d5_after_resume)
+    if already_paused:
+        robot.state = deepcopy(observed)
+        client.async_command.side_effect = [{"data": deepcopy(observed)}]
     else:
-        # The refusal is confirmed against a fresh read before it is reported.
-        assert error.value.translation_key == "base_not_found"
-        assert client.async_command.await_args_list == [command_call(names, "state")]
+        client.async_command.side_effect = [
+            {"result": "ok"},
+            {"data": deepcopy(observed)},
+        ]
+    with patch(
+        "custom_components.vacuula.coordinator.asyncio.sleep", new_callable=AsyncMock
+    ) as sleep:
+        with pytest.raises(ServiceValidationError) as error:
+            if platform == "button":
+                await VacuulaButton(
+                    coordinator, "robot", "return_to_base"
+                ).async_press()
+            else:
+                await VacuulaVacuum(coordinator, "robot").async_return_to_base()
+    assert error.value.translation_key == "action_unavailable"
+    assert robot.state == observed
+    assert robot.state["state"] == 3
+    assert robot.state["availableCommands"]["resume"] is True
+    assert not robot.returning
+    expected = ("state",) if already_paused else ("pause", "state")
+    assert client.async_command.await_args_list == [
+        command_call(names, action) for action in expected
+    ]
+    if already_paused:
+        sleep.assert_not_awaited()
+    else:
+        sleep.assert_awaited_once_with(3.5)
 
 
 @pytest.mark.parametrize("setup_robot", [GEN3], indirect=True)

@@ -36,6 +36,7 @@ def boundary_coordinator(hass):
     entry.add_to_hass(hass)
     client = MagicMock()
     client.async_maps = AsyncMock(return_value=[{"id": "map1", "promoted": True}])
+    client.async_map_boundaries = AsyncMock(return_value=[])
     client.async_map_action = AsyncMock(return_value={"saved": True})
     client.async_command = AsyncMock(return_value={"code": 200})
     coordinator = VacuulaCoordinator(hass, entry, client)
@@ -55,6 +56,7 @@ async def test_fresh_promoted_map_is_saved_before_upload(boundary_coordinator):
     assert result == {"saved": True}
     assert coordinator.client.mock_calls == [
         call.async_maps("robot"),
+        call.async_map_boundaries("robot", "map1"),
         call.async_map_action("robot", "map1", "boundaries", BOUNDARIES),
         call.async_map_action("robot", "map1", "promote"),
         call.async_maps("robot"),
@@ -80,9 +82,11 @@ async def test_failed_save_does_not_promote_previous_boundaries(boundary_coordin
     coordinator = boundary_coordinator
     failure = CannotConnect("Boundary save failed")
     coordinator.client.async_map_action.side_effect = failure
-    with pytest.raises(CannotConnect) as caught:
+    with pytest.raises(HomeAssistantError) as caught:
         await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
-    assert caught.value is failure
+    assert caught.value.__cause__ is failure
+    assert caught.value.translation_key == "map_promotion_failed"
+    assert not coordinator.has_pending_map_recovery("robot")
     coordinator.client.async_map_action.assert_awaited_once_with(
         "robot", "map1", "boundaries", BOUNDARIES
     )
@@ -142,7 +146,9 @@ async def test_map_lookup_failure_prevents_any_write(boundary_coordinator):
     coordinator.client.async_map_action.assert_not_awaited()
 
 
-@pytest.mark.parametrize("blocked_stage", ["maps", "boundaries", "promote"])
+@pytest.mark.parametrize(
+    "blocked_stage", ["maps", "boundary_read", "boundaries", "promote"]
+)
 async def test_other_commands_cannot_interleave_with_map_transaction(
     boundary_coordinator, blocked_stage
 ):
@@ -170,6 +176,11 @@ async def test_other_commands_cannot_interleave_with_map_transaction(
         await stage(action)
         return {"ok": True}
 
+    async def map_boundaries(serial, map_id):
+        """Hold the authoritative boundary snapshot inside the map transaction."""
+        await stage("boundary_read")
+        return []
+
     async def command(serial, payload):
         """Record robot-command execution after the map transaction stages."""
         operations.append("command")
@@ -183,6 +194,7 @@ async def test_other_commands_cannot_interleave_with_map_transaction(
         )
 
     coordinator.client.async_maps.side_effect = maps
+    coordinator.client.async_map_boundaries.side_effect = map_boundaries
     coordinator.client.async_map_action.side_effect = map_action
     coordinator.client.async_command.side_effect = command
     transaction = asyncio.create_task(
@@ -201,6 +213,7 @@ async def test_other_commands_cannot_interleave_with_map_transaction(
         # The schedule re-read belongs to the transaction; the competitor runs last.
         assert operations == [
             "maps",
+            "boundary_read",
             "boundaries",
             "promote",
             "maps",
@@ -348,10 +361,10 @@ async def test_inactive_boundaries_can_still_be_saved_offline(boundary_coordinat
 
 
 @pytest.mark.parametrize("operation", ["promote", "boundaries"])
-async def test_rejected_promotion_preserving_active_map_clears_recovery(
+async def test_rejected_promotion_distinguishes_unchanged_map_from_saved_boundaries(
     boundary_coordinator, operation
 ):
-    """A disconnect after preflight can be rejected before any server demotion."""
+    """Preserve recovery for new boundaries despite an unchanged active-map flag."""
     coordinator = boundary_coordinator
     failure = VacuulaError("Robot not connected")
     coordinator.client.async_map_action.side_effect = (
@@ -363,11 +376,14 @@ async def test_rejected_promotion_preserving_active_map_clears_recovery(
         else:
             await coordinator.async_set_map_boundaries("robot", "map1", BOUNDARIES)
     assert error.value.translation_key == "map_promotion_failed"
-    assert not coordinator.has_pending_map_recovery("robot")
-    coordinator.validate_map_recovery("robot")
+    assert coordinator.has_pending_map_recovery("robot") is (operation == "boundaries")
+    if operation == "promote":
+        coordinator.validate_map_recovery("robot")
     assert coordinator.robots["robot"].maps == [{"id": "map1", "promoted": True}]
     issue_id = f"{coordinator.entry.entry_id}_robot_map_promotion"
-    assert ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None
+    assert (
+        ir.async_get(coordinator.hass).async_get_issue(DOMAIN, issue_id) is None
+    ) is (operation == "promote")
 
 
 @pytest.mark.parametrize(

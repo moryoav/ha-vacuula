@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10
+
+- Confirmed fresh state before Start chooses between resuming and starting a new run, and allowed connected command buttons to reach live readiness validation instead of refusing stale flags.
+- Kept new Generation 4 boundary edits guarded before the save request, including lost replies, rejected promotions, restarts and failed attempts to promote another map. Confirmed unchanged failed saves clear only their own new guard.
+- Cleared the Generation 3 returning marker after confirmed terminal states while retaining it through delayed movement after an acknowledged home command.
+- Updated device firmware and model metadata after successful robot reads without reloading or changing user device names.
+
 ## 0.1.9
 
 - Stopped sending a Generation 3 robot home while it reports `goToBase: false`. On the D5 that command ended the run where the robot stood instead of docking it. The run now stays paused, and the error says when the robot has not found its base during the run.

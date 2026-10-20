@@ -24,7 +24,7 @@ These statuses are a development checklist, subject to independent review.
 | Entities | Named controls plus optional scalar diagnostics for state, information, statistics, current and latest runs/subruns. Extra telemetry is read-only and disabled by default. Maps and schedule events dynamically add configuration switches that preserve existing names or commands, follow renames, and are removed when the record is deleted. |
 | Actions | Ten globally registered administrator actions, explicit schemas and generation checks, translated errors, safe mapped-cleaning defaults, atomic pause/dock and Gen4 boundary upload sequences, local-to-UTC Gen3 schedules, no raw command passthrough, and no automatic command retries. |
 | Diagnostics | Cached allowlisted telemetry including reviewed details/meta fields; server URL, robot identities, maps, and complete schedule contents are excluded. No diagnostic network requests. |
-| Repairs | A persisted marker records an unconfirmed Gen4 floorplan upload. Offline promotions are refused before writes. After a failed upload, the guard and a notice naming the robot and map ID stay until a floorplan is promoted again (here or in the app), the map leaves use, or it is demoted with `map_action`. |
+| Repairs | Persisted guards cover uncertain Gen4 floorplan uploads and active boundary saves, including lost responses and restarts. Offline promotions are refused before writes. Ordinary promotion uncertainty clears when a floorplan is confirmed active. Changed boundaries require a confirmed upload or an observed app demotion followed by promotion; an unchanged promoted flag cannot prove the robot received new zones. A different active floorplan, a map leaving use, robot removal, or deliberate demotion with `map_action` also resolves recovery. Notices identify the robot and map ID. |
 | Documentation | README includes installation/removal, setup fields, entities, all actions, examples, data updates, supported generations, limitations, and troubleshooting. Protocol notes identify the reviewed API and validation limits. All Python definitions have docstrings, with 100% presence coverage enforced by a repository-wide AST audit in pytest and GitHub checks. |
 | Branding | Official Vacuula artwork is bundled in `brand/` as transparent 256- and 512-pixel PNG icons. Home Assistant supplies logo and dark-theme fallbacks. Artwork sources and licensing are preserved in `docs/branding/`. |
 
@@ -34,17 +34,22 @@ The test environment pins **Home Assistant 2026.10.2**, Python 3.14, and
 `pytest-homeassistant-custom-component` in `requirements_test.txt`. Tests cover
 the client, config flow, coordinator, integration lifecycle, actions, images,
 diagnostics, and regression cases. The [local validation](local-validation.md)
-records 730 passing tests, 99.65% combined line and branch coverage, at least
-98.56% in every module, 99.32% config-flow coverage, and clean strict mypy
-results for all 19 integration modules. Local coverage rules are marked `done`.
+records 779 passing tests, 99.57% combined line and branch coverage, at least
+97.12% in every module, and 99.32% config-flow coverage. Strict mypy passes for
+all 19 integration modules and two tool modules, 21 checked modules in total.
+Docstring coverage is 100%, with 854 documented items across 60 Python files.
+Local coverage rules are marked `done`.
 The strict-typing rule remains `todo` for separate client packaging and formal
 Core registration.
 
 D5 hardware checks include telemetry, Locate, Start, Pause, Resume, Stop, spot
 cleaning, preference changes, Gen3 schedule writes and Home Assistant's Return
-to base action. Fresh reads confirmed docking after the pause-then-home sequence
-whenever the robot had seen its base during the run. Map changes, log uploads
-and factory reset were not exercised on hardware. Generation 4 remains source-verified and fixture-tested.
+to base action. In tested runs where native `goToBase` readiness allowed the
+pause-then-home sequence, fresh reads confirmed docking. Seeing the base alone
+does not guarantee readiness: the D5 also refused after a paused and resumed
+run with `dockHasBeenSeen: true`. The integration respects that refusal and
+leaves the run paused. Map changes, log uploads and factory reset were not
+exercised on hardware. Generation 4 remains source-verified and fixture-tested.
 The local test suite uses mocked transports and does not contact the robot.
 
 ## Work before a formal claim

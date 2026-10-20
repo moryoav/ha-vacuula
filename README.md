@@ -154,6 +154,10 @@ intended, select it again after upgrading. Resuming continues the existing run.
 Returning to base during cleaning pauses the run, waits 3.5 seconds and checks
 the robot's latest command readiness before sending it home. The sequence is
 serialized so another action cannot interrupt the pause-to-home transition.
+Some Generation 3 firmware keeps `goToBase` false after pausing. A fresh state
+confirming an error-free, resumable paused cleaning run permits the home command
+in that case, matching the app. Command acceptance does not prove docking;
+the vacuum activity and docked sensor continue to show the reported robot state.
 
 The vacuum's activity distinguishes cleaning and exploration from maintenance.
 Log uploads, software updates, menus and stationary map transfers show docked
@@ -351,7 +355,9 @@ Schedule-event switches require a connected robot. Both kinds of switch read
 back after changes; a change the server applied is not reported as failed when
 only the follow-up read fails.
 
-Robot commands are serialized per robot and sent once. A timeout does not prove
+Robot commands are serialized per robot and sent once. Map selection and native
+command-readiness checks happen inside the same lock as execution, so a queued
+action is checked again when it executes. A timeout does not prove
 that the robot ignored a command, so commands are never automatically retried.
 After a successful command, the integration reads state back from the robot.
 

@@ -16,6 +16,7 @@ from .entity import (
     VacuulaEntity,
     async_add_robot_entities,
     async_remove_stale_entity,
+    async_remove_stale_records,
     set_name_placeholders,
     value_at,
 )
@@ -44,6 +45,38 @@ async def async_setup_entry(
     entry: ConfigEntry[VacuulaCoordinator],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    coordinator = entry.runtime_data
+
+    @callback
+    def remove_deleted_records() -> None:
+        for serial, robot in coordinator.robots.items():
+            if not robot.listed:
+                continue
+            if robot.generation == GEN3:
+                if robot.capabilities.get("maps_available") is not True:
+                    continue
+                prefix = f"{serial}_map_"
+                current = {
+                    f"{prefix}{floor_map['id']}_enabled"
+                    for floor_map in robot.maps
+                    if isinstance(floor_map.get("id"), str)
+                }
+            else:
+                events = robot.schedule.get("events")
+                if not isinstance(events, list):
+                    continue
+                prefix = f"{serial}_schedule_event_"
+                current = {
+                    f"{prefix}{event['id']}_enabled"
+                    for event in events
+                    if isinstance(event, dict) and isinstance(event.get("id"), str)
+                }
+            async_remove_stale_records(
+                coordinator, serial, __name__, "switch", prefix, current
+            )
+
+    remove_deleted_records()
+    entry.async_on_unload(coordinator.async_add_listener(remove_deleted_records))
     async_add_robot_entities(entry, async_add_entities, create_entities)
 
 

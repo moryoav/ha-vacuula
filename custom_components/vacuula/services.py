@@ -404,13 +404,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 # ownership using the per-robot map file before sending a write.
                 await coordinator.client.async_map(serial, data["map_id"])
             if action == "clean":
-                if data["cleaning_type"] != "house":
-                    await coordinator.async_refresh_maps(serial)
-                    coordinator.validate_map_recovery(serial)
                 result = await coordinator.async_command(
                     serial,
-                    _clean_command(robot, data, use_default_map=True),
+                    lambda current: _clean_command(current, data, use_default_map=True),
                     require_map_recovery=data["cleaning_type"] != "house",
+                    refresh_maps=data["cleaning_type"] != "house",
                 )
             elif action == "set_schedule":
                 _require_generation(robot, GEN3)
@@ -424,10 +422,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
             elif action == "update_schedule_event":
                 _require_generation(robot, GEN4)
                 if "event_id" in data:
-                    if ("map_id" in data or "cleaning_type" in data) and data.get(
-                        "cleaning_type"
-                    ) != "house":
-                        await coordinator.async_refresh_maps(serial)
+                    refresh_maps = (
+                        "map_id" in data or "cleaning_type" in data
+                    ) and data.get("cleaning_type") != "house"
 
                     def update_event(event: dict[str, Any]) -> dict[str, Any]:
                         if (
@@ -448,32 +445,39 @@ def async_setup_services(hass: HomeAssistant) -> None:
                         return event
 
                     result = await coordinator.async_update_schedule_event(
-                        serial, data["event_id"], update_event
+                        serial,
+                        data["event_id"],
+                        update_event,
+                        refresh_maps=refresh_maps,
                     )
                     return {"response": result}
                 if not {"enabled", "days", "time"}.issubset(data):
                     raise _error("invalid_schedule_event")
                 cleaning_type = data.get("cleaning_type", "auto")
-                if cleaning_type != "house":
-                    await coordinator.async_refresh_maps(serial)
-                    coordinator.validate_map_recovery(serial)
-                command = _clean_command(
-                    robot, data, use_default_map=True, require_dock=False
-                )
-                event = {
-                    "enabled": data["enabled"],
-                    "days": data["days"],
-                    "time": data["time"],
-                    "command": {
-                        **command,
-                        "auto_localization": False,
-                        "force_floorplan": False,
-                    },
-                }
+
+                def create_event(current: RobotData) -> dict[str, Any]:
+                    command = _clean_command(
+                        current, data, use_default_map=True, require_dock=False
+                    )
+                    return {
+                        "ability": "scheduling.update",
+                        "event": {
+                            "enabled": data["enabled"],
+                            "days": data["days"],
+                            "time": data["time"],
+                            "command": {
+                                **command,
+                                "auto_localization": False,
+                                "force_floorplan": False,
+                            },
+                        },
+                    }
+
                 result = await coordinator.async_command(
                     serial,
-                    {"ability": "scheduling.update", "event": event},
+                    create_event,
                     require_map_recovery=cleaning_type != "house",
+                    refresh_maps=cleaning_type != "house",
                 )
             elif action == "delete_schedule_event":
                 _require_generation(robot, GEN4)

@@ -35,7 +35,16 @@ def coordinator(hass):
         },
         capabilities={"maps": "advanced-1", "spotCleaning": "basic-1"},
     )
-    coordinator.async_command = AsyncMock(return_value={})
+    coordinator.dispatched_command = AsyncMock(return_value={})
+
+    async def command(serial, payload, *, refresh_maps=False, **kwargs):
+        if refresh_maps:
+            await coordinator.async_refresh_maps(serial)
+        if callable(payload):
+            payload = payload(coordinator.robots[serial])
+        return await coordinator.dispatched_command(serial, payload, **kwargs)
+
+    coordinator.async_command = AsyncMock(side_effect=command)
     coordinator.async_refresh_maps = AsyncMock()
     return coordinator
 
@@ -97,7 +106,7 @@ async def test_default_start_refreshes_maps_and_preserves_no_go_lines(
                 }
             ],
         }
-    coordinator.async_command.assert_awaited_once_with(
+    coordinator.dispatched_command.assert_awaited_once_with(
         "robot", expected, require_map_recovery=True
     )
 
@@ -112,8 +121,10 @@ async def test_automatic_start_button_falls_back_when_not_docked(
     button = VacuulaButton(coordinator, "robot", "start")
     assert button.available
     await button.async_press()
-    payload = coordinator.async_command.await_args.args[1]
-    assert coordinator.async_command.await_args.kwargs == {"require_map_recovery": True}
+    payload = coordinator.dispatched_command.await_args.args[1]
+    assert coordinator.dispatched_command.await_args.kwargs == {
+        "require_map_recovery": True
+    }
     if generation == GEN3:
         assert payload["params"]["category"] == 2
     else:
@@ -131,7 +142,7 @@ async def test_explicit_mapped_cleaning_still_requires_dock(
     with pytest.raises(ServiceValidationError) as error:
         await VacuulaVacuum(coordinator, "robot").async_start()
     assert error.value.translation_key == "map_cleaning_requires_dock"
-    coordinator.async_command.assert_not_awaited()
+    coordinator.dispatched_command.assert_not_awaited()
 
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])
@@ -162,8 +173,10 @@ async def test_automatic_start_falls_back_without_active_map(
     button = VacuulaButton(coordinator, "robot", "start")
     assert button.available
     await button.async_press()
-    payload = coordinator.async_command.await_args.args[1]
-    assert coordinator.async_command.await_args.kwargs == {"require_map_recovery": True}
+    payload = coordinator.dispatched_command.await_args.args[1]
+    assert coordinator.dispatched_command.await_args.kwargs == {
+        "require_map_recovery": True
+    }
     if generation == GEN3:
         assert payload["params"]["category"] == 2
     else:
@@ -218,8 +231,8 @@ async def test_explicit_house_is_deliberate_mapless_cleaning(coordinator, genera
     coordinator.cleaning_options["robot"] = {"category": "house"}
     await VacuulaVacuum(coordinator, "robot").async_start()
     coordinator.async_refresh_maps.assert_not_awaited()
-    payload = coordinator.async_command.await_args.args[1]
-    assert coordinator.async_command.await_args.kwargs == {
+    payload = coordinator.dispatched_command.await_args.args[1]
+    assert coordinator.dispatched_command.await_args.kwargs == {
         "require_map_recovery": False
     }
     if generation == GEN3:
@@ -239,7 +252,7 @@ async def test_unresolved_floorplan_upload_does_not_silently_start_without_zones
     with pytest.raises(ServiceValidationError) as error:
         await VacuulaVacuum(coordinator, "robot").async_start()
     assert error.value.translation_key == "map_promotion_required"
-    coordinator.async_command.assert_not_awaited()
+    coordinator.dispatched_command.assert_not_awaited()
 
 
 async def test_explicit_house_remains_available_during_floorplan_recovery(coordinator):
@@ -248,7 +261,7 @@ async def test_explicit_house_remains_available_during_floorplan_recovery(coordi
     coordinator.cleaning_options["robot"] = {"category": "house"}
     coordinator._set_pending_promotion("robot", robot.maps[0]["id"])
     await VacuulaVacuum(coordinator, "robot").async_start()
-    assert coordinator.async_command.await_args.args[1]["runs"][0]["map"] is None
+    assert coordinator.dispatched_command.await_args.args[1]["runs"][0]["map"] is None
 
 
 async def test_explicit_spot_preserves_size_and_does_not_use_a_map(coordinator):
@@ -260,7 +273,7 @@ async def test_explicit_spot_preserves_size_and_does_not_use_a_map(coordinator):
     }
     await VacuulaVacuum(coordinator, "robot").async_start()
     coordinator.async_refresh_maps.assert_not_awaited()
-    coordinator.async_command.assert_awaited_once_with(
+    coordinator.dispatched_command.assert_awaited_once_with(
         "robot",
         {
             "cmd": "startCleaning",
@@ -286,7 +299,7 @@ async def test_resume_preserves_current_run_instead_of_starting_another(
     ] = True
     await VacuulaVacuum(coordinator, "robot").async_start()
     coordinator.async_refresh_maps.assert_not_awaited()
-    coordinator.async_command.assert_awaited_once_with(
+    coordinator.dispatched_command.assert_awaited_once_with(
         "robot",
         {"cmd": "resumeCleaning"}
         if generation == GEN3
@@ -298,7 +311,7 @@ async def test_failed_map_refresh_does_not_send_a_clean_command(coordinator):
     coordinator.async_refresh_maps.side_effect = HomeAssistantError("unavailable")
     with pytest.raises(HomeAssistantError):
         await VacuulaVacuum(coordinator, "robot").async_start()
-    coordinator.async_command.assert_not_awaited()
+    coordinator.dispatched_command.assert_not_awaited()
 
 
 @pytest.mark.parametrize("generation", [GEN3, GEN4])

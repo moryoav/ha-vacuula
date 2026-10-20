@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.6
+
+- Allowed a freshly verified, resumable Generation 3 run to return home despite a false `goToBase` flag, matching the app sequence and the D5's accepted command; aligned button and readiness state.
+- Selected cleaning and schedule map targets under the same robot lock as their command, preventing a queued promotion from being followed by a stale mapless start.
+- Rechecked robot connection and native command readiness after queued actions acquire the robot lock, including spot cleaning and exploration.
+- Removed deleted map and schedule-event entities even when disabled, preserving their disabled preferences if records return.
+- Rejected malformed map identifiers during image discovery.
+- Preserved config-entry unique IDs when reconfiguration uses an address held by an ignored discovery.
+- Rejected JSON exponent overflow in HTTP and event responses before non-finite values reach Home Assistant.
+
 ## 0.1.5
 
 - Let Vacuula's robot list decide connection status, so one slow or failed robot read no longer makes the robot unavailable or silently drops stop, pause and return-to-base.

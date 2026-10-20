@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import async_get as async_get_device_registry
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -99,7 +100,49 @@ def async_remove_stale_entity(
     if entity.unique_id is not None:
         known.get(serial, set()).discard(entity.unique_id)
     if entity.registry_entry is not None:
-        er.async_get(entity.hass).async_remove(entity.entity_id)
+        registry = er.async_get(entity.hass)
+        if registry.async_get(entity.entity_id) is not None:
+            registry.async_remove(entity.entity_id)
+
+
+@callback
+def async_remove_stale_records(
+    coordinator: VacuulaCoordinator,
+    serial: str,
+    module: str,
+    platform: str,
+    prefix: str,
+    current: set[str],
+) -> None:
+    """Prune deleted map/event records, including entities disabled by the user.
+
+    Disabled entities do not subscribe to coordinator updates, so their own
+    update callbacks cannot remove their registry records. Call only after an
+    authoritative record list has been read for a robot still on the server.
+    """
+    known = coordinator.known_entities.get(module, {}).get(serial, set())
+    known.difference_update(
+        unique_id
+        for unique_id in tuple(known)
+        if unique_id.startswith(prefix) and unique_id not in current
+    )
+    registry = er.async_get(coordinator.hass)
+    device = async_get_device_registry(coordinator.hass).async_get_device_by_identifier(
+        (DOMAIN, serial), coordinator.entry.entry_id
+    )
+    if device is None:
+        return
+    for entry in er.async_entries_for_config_entry(
+        registry, coordinator.entry.entry_id
+    ):
+        if (
+            entry.domain == platform
+            and entry.platform == DOMAIN
+            and entry.device_id == device.id
+            and entry.unique_id.startswith(prefix)
+            and entry.unique_id not in current
+        ):
+            registry.async_remove(entry.entity_id)
 
 
 def set_name_placeholders(entity: Entity, placeholders: dict[str, str]) -> None:

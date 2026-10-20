@@ -46,6 +46,20 @@ def setup(hass):
         identifiers={(DOMAIN, robot.serial)},
     )
     coordinator.robots = {robot.serial: robot}
+    coordinator.command_payloads = []
+
+    async def command(serial, payload, **kwargs):
+        # Mirror the coordinator's deferred selection for focused payload tests.
+        if kwargs.get("refresh_maps"):
+            await coordinator.async_refresh_maps(serial)
+        if kwargs.get("require_map_recovery"):
+            coordinator.validate_map_recovery(serial)
+        if callable(payload):
+            payload = payload(coordinator.robots[serial])
+        coordinator.command_payloads.append(payload)
+        return coordinator.async_command.return_value
+
+    coordinator.async_command.side_effect = command
     async_setup_services(hass)
     return coordinator, robot, device.id, entry
 
@@ -77,7 +91,7 @@ async def test_targets(hass, setup):
 async def test_clean_gen3(hass, setup):
     coordinator = setup[0]
     await call(hass, setup, "clean")
-    assert coordinator.async_command.await_args.args[1] == {
+    assert coordinator.command_payloads[-1] == {
         "cmd": "startCleaning",
         "params": {"category": 2, "mode": 1, "navigationMode": 1},
     }
@@ -90,7 +104,7 @@ async def test_clean_gen3(hass, setup):
         mode="turbo",
         navigation="deep",
     )
-    assert coordinator.async_command.await_args.args[1]["params"] == {
+    assert coordinator.command_payloads[-1]["params"] == {
         "category": 4,
         "mode": 2,
         "navigationMode": 3,
@@ -113,7 +127,7 @@ async def test_clean_gen4(hass, setup):
     await call(
         hass, setup, "clean", map_id="map1", zone_ids=["a", "b"], navigation="gentle"
     )
-    command = coordinator.async_command.await_args.args[1]
+    command = coordinator.command_payloads[-1]
     assert command["ability"] == "cleaning.start"
     assert [run["map"]["track_id"] for run in command["runs"]] == ["a", "b"]
     for payload in [{"navigation": "deep"}, {"mode": "max"}]:
@@ -124,14 +138,14 @@ async def test_clean_gen4(hass, setup):
         await call(hass, setup, "clean", mode="max")
     robot.info["label_serial"] = "AAAAN2TEST"
     await call(hass, setup, "clean", mode="max")
-    assert coordinator.async_command.await_args.args[1]["runs"][0]["map"] is None
+    assert coordinator.command_payloads[-1]["runs"][0]["map"] is None
 
 
 async def test_schedule(hass, setup):
     coordinator, robot, _, _ = setup
     events = [{"mode": 1, "day": 0, "startTime": "10:30"}]
     await call(hass, setup, "set_schedule", events=events, time_basis="utc")
-    assert coordinator.async_command.await_args.args[1] == {
+    assert coordinator.command_payloads[-1] == {
         "cmd": "setSchedule",
         "params": {"events": events},
     }
@@ -154,9 +168,9 @@ async def test_schedule(hass, setup):
     await call(
         hass, setup, "update_schedule_event", enabled=False, days=["sun"], time="00:00"
     )
-    assert "id" not in coordinator.async_command.await_args.args[1]["event"]
+    assert "id" not in coordinator.command_payloads[-1]["event"]
     await call(hass, setup, "delete_schedule_event", event_id="old")
-    assert coordinator.async_command.await_args.args[1] == {
+    assert coordinator.command_payloads[-1] == {
         "ability": "scheduling.delete",
         "id": "old",
     }
@@ -165,7 +179,7 @@ async def test_schedule(hass, setup):
 async def test_boundaries(hass, setup):
     coordinator, robot, _, _ = setup
     await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[])
-    assert coordinator.async_command.await_args.args[1]["params"]["boundaries"] == []
+    assert coordinator.command_payloads[-1]["params"]["boundaries"] == []
     polygon = {
         "id": "a",
         "name": "Test",
@@ -179,11 +193,11 @@ async def test_boundaries(hass, setup):
     polygon["vertices"].append([0, 1])
     # Like the Vacuula app, a missing Gen3 relevancy is the vertex average.
     await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[polygon])
-    sent = coordinator.async_command.await_args.args[1]["params"]["boundaries"][0]
+    sent = coordinator.command_payloads[-1]["params"]["boundaries"][0]
     assert sent["relevancy"] == pytest.approx([1 / 3, 2 / 3])
     polygon["relevancy"] = [0.5, 0.5]
     await call(hass, setup, "set_boundaries", map_id="map1", boundaries=[polygon])
-    sent = coordinator.async_command.await_args.args[1]["params"]["boundaries"][0]
+    sent = coordinator.command_payloads[-1]["params"]["boundaries"][0]
     assert sent["relevancy"] == [0.5, 0.5]
     robot.generation = GEN4
     with pytest.raises(ServiceValidationError):

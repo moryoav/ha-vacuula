@@ -422,9 +422,9 @@ async def test_buttons_safe_optional_and_refresh(coordinator):
     robot.state = {"details": {"isDocked": True}, "availableCommands": {"start": True}}
     buttons = {item.key: item for item in button_entities(coordinator, robot)}
     await buttons["explore"].async_press()
-    coordinator.async_command.assert_awaited_with(
-        "robot", {"cmd": "startPersistentMapExploration"}
-    )
+    serial, builder = coordinator.async_command.await_args.args
+    assert serial == "robot"
+    assert builder(robot) == {"cmd": "startPersistentMapExploration"}
     await buttons["dismiss_alert"].async_press()
     coordinator.async_command.assert_awaited_with(
         "robot", {"cmd": "dismissCurrentAlert"}

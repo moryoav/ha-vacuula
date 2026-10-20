@@ -126,6 +126,11 @@ Explicit house and spot controls remain mapless.
 Returning to base pauses a pausable run, waits 3.5 seconds and re-reads command
 readiness before sending the docking command. The entire sequence holds the
 robot lock; failed pause, state read or cancellation prevents the later command.
+The live D5 accepted `sendToBase` while a fresh error-free paused run still
+reported `goToBase: false` and `resume: true`. A Gen3-only override allows that
+verified resumable cleaning/exploration state, including an already-paused run.
+Busy, errored, docked or non-resumable false-flag states remain rejected.
+No activity or docking result is inferred from an acknowledgement.
 
 Generation 3 preference writes read and merge the full preferences object under
 the same lock as the write before
@@ -234,7 +239,11 @@ SSE has no total timeout, a 10-second connect
 timeout, and a 45-second socket-read timeout. JSON bodies are limited to 16 MiB
 and SSE frames to 2 MiB. Invalid JSON and non-finite JSON numbers are rejected.
 
-Robot commands are serialized per robot. They are never retried automatically,
+Robot commands are serialized per robot. Cleaning and schedule payload builders
+refresh and select maps inside the lock before sending; native control readiness
+and connection checks also run after acquiring it. This prevents a completed
+promotion or earlier command from being followed by a stale queued target or
+readiness decision. Commands are never retried automatically,
 including after a timeout, because execution might already have occurred.
 Successful commands trigger a state readback. Map writes first read the map
 under the target robot to check ownership. Action schemas validate identifiers,

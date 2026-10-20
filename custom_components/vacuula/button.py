@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, GEN3
 from .coordinator import VacuulaCoordinator
-from .data import RobotData
+from .data import RobotData, gen3_paused_run_can_return_home
 from .entity import VacuulaEntity, async_add_robot_entities
 from .vacuum import VacuulaVacuum
 
@@ -78,6 +78,7 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
             return (
                 self.command_allowed("goToBase", "return_to_base") is not False
                 or self.command_allowed("pause", "pause") is True
+                or gen3_paused_run_can_return_home(self.robot)
             )
         if self.key in COMMANDS:
             _cmd, _ability, gen3_flag, gen4_flag = COMMANDS[self.key]
@@ -116,19 +117,21 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
             await self.coordinator.async_command(
                 self.serial, {"cmd": "uploadLogs", "params": {"recentCount": 1}}
             )
+        elif self.key in COMMANDS:
+            await VacuulaVacuum(self.coordinator, self.serial)._command(
+                *COMMANDS[self.key]
+            )
+        elif self.key == "explore":
+
+            def build_command(robot: RobotData) -> dict[str, Any]:
+                if not self.available:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN, translation_key="action_unavailable"
+                    )
+                return {"cmd": "startPersistentMapExploration"}
+
+            await self.coordinator.async_command(self.serial, build_command)
         else:
-            command: dict[str, Any]
-            if self.key in COMMANDS:
-                cmd, ability, _gen3, _gen4 = COMMANDS[self.key]
-                command = (
-                    {"cmd": cmd}
-                    if self.robot.generation == GEN3
-                    else {"ability": ability}
-                )
-            else:
-                command = {
-                    "cmd": "dismissCurrentAlert"
-                    if self.key == "dismiss_alert"
-                    else "startPersistentMapExploration"
-                }
-            await self.coordinator.async_command(self.serial, command)
+            await self.coordinator.async_command(
+                self.serial, {"cmd": "dismissCurrentAlert"}
+            )

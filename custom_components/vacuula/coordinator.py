@@ -21,7 +21,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .client import CannotConnect, UnsupportedCommand, VacuulaClient, VacuulaError
 from .const import DOMAIN, GEN3, GEN4
-from .data import RobotData, response_data
+from .data import RobotData, gen3_paused_run_can_return_home, response_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -688,6 +688,8 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         serial: str,
         event_id: str,
         update: Callable[[dict[str, Any]], dict[str, Any]],
+        *,
+        refresh_maps: bool = False,
     ) -> dict[str, Any]:
         """Read, merge and write an existing event under the robot command lock."""
         async with self._lock(serial):
@@ -695,10 +697,12 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 raise HomeAssistantError(
                     translation_domain=DOMAIN, translation_key="offline"
                 )
-            if self.has_pending_map_recovery(serial):
-                with suppress(VacuulaError):
-                    await self._async_read_maps_locked(serial)
             try:
+                if refresh_maps:
+                    await self._async_read_maps_locked(serial)
+                elif self.has_pending_map_recovery(serial):
+                    with suppress(VacuulaError):
+                        await self._async_read_maps_locked(serial)
                 schedule = response_data(
                     await self.client.async_command(
                         serial, {"ability": "scheduling.show"}
@@ -735,20 +739,23 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
     async def async_command(
         self,
         serial: str,
-        command: dict[str, Any],
+        command: dict[str, Any] | Callable[[RobotData], dict[str, Any]],
         *,
         refresh: bool = True,
         require_map_recovery: bool = False,
+        refresh_maps: bool = False,
     ) -> dict[str, Any]:
-        """Execute exactly once, serialize commands and confirm state afterwards."""
-        if serial not in self.robots or not self.robots[serial].connected:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="offline"
-            )
+        """Select and execute once under the same lock as map changes."""
         async with self._lock(serial):
-            if require_map_recovery:
-                self.validate_map_recovery(serial)
+            self._require_robot_connection(serial)
             try:
+                if refresh_maps:
+                    await self._async_read_maps_locked(serial)
+                    self._require_robot_connection(serial)
+                if require_map_recovery:
+                    self.validate_map_recovery(serial)
+                if callable(command):
+                    command = command(self.robots[serial])
                 if command.get("cmd") == "setPreferences":
                     # Read and merge under the same lock as the write so two
                     # settings actions cannot revert each other's changes.
@@ -827,6 +834,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             else {"ability": "navigation.return_to_base"}
         )
         async with self._lock(serial):
+            self._require_robot_connection(serial)
             try:
                 if command_allowed("pause") is True:
                     await self.client.async_command(serial, pause)
@@ -835,10 +843,22 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                         raise HomeAssistantError(
                             translation_domain=DOMAIN, translation_key="command_failed"
                         )
-                if command_allowed(home_flag) is False:
+                elif command_allowed(
+                    home_flag
+                ) is False and gen3_paused_run_can_return_home(robot):
+                    # A cached paused run can have ended while this request was
+                    # queued. Confirm it before overriding the firmware flag.
+                    if not await self._async_read_state_locked(robot):
+                        raise HomeAssistantError(
+                            translation_domain=DOMAIN, translation_key="command_failed"
+                        )
+                if command_allowed(home_flag) is False and not (
+                    gen3_paused_run_can_return_home(robot)
+                ):
                     raise ServiceValidationError(
                         translation_domain=DOMAIN, translation_key="action_unavailable"
                     )
+                self._require_robot_connection(serial)
                 await self.client.async_command(serial, home)
                 await self._async_read_state_locked(robot)
             except VacuulaError as err:

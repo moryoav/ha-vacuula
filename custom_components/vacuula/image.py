@@ -17,7 +17,11 @@ from . import VacuulaConfigEntry
 from .client import VacuulaError
 from .const import DOMAIN
 from .coordinator import VacuulaCoordinator
-from .entity import async_remove_stale_entity, set_name_placeholders
+from .entity import (
+    async_remove_stale_entity,
+    async_remove_stale_records,
+    set_name_placeholders,
+)
 
 PARALLEL_UPDATES = 0
 
@@ -89,10 +93,23 @@ async def async_setup_entry(
         for serial, robot in coordinator.robots.items():
             if not robot.listed:
                 continue
+            map_ids = {
+                map_id
+                for floor_map in robot.maps
+                if isinstance(map_id := floor_map.get("id"), str) and map_id
+            }
+            if robot.capabilities.get("maps_available") is True:
+                async_remove_stale_records(
+                    coordinator,
+                    serial,
+                    __name__,
+                    "image",
+                    f"{serial}_map_",
+                    {f"{serial}_map_{map_id}" for map_id in map_ids},
+                )
             added = known.setdefault(serial, set())
-            for floor_map in robot.maps:
-                map_id = str(floor_map.get("id", ""))
-                if not map_id or f"{serial}_map_{map_id}" in added:
+            for map_id in sorted(map_ids):
+                if f"{serial}_map_{map_id}" in added:
                     continue
                 added.add(f"{serial}_map_{map_id}")
                 entities.append(VacuulaMapImage(coordinator, serial, map_id))

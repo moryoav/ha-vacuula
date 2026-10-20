@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import GEN3
 from .coordinator import VacuulaCoordinator
-from .data import RobotData
+from .data import RobotData, return_to_base_ready
 from .entity import (
     VacuulaEntity,
     async_add_robot_entities,
@@ -167,12 +167,7 @@ def binary_value(
     path = description.gen3_path if robot.generation == GEN3 else description.gen4_path
     value = value_at(robot.state, *path) if path else None
     if key == "can_return_to_base":
-        pause = value_at(robot.state, path[0], "pause")
-        if value is True or pause is True:
-            return True
-        if value is False and pause is False:
-            return False
-        return None
+        return return_to_base_ready(robot)
     return value if isinstance(value, bool) else None
 
 

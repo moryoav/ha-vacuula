@@ -8,10 +8,30 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.vacuula.binary_sensor import DESCRIPTIONS, binary_value
+from custom_components.vacuula.button import VacuulaButton
 from custom_components.vacuula.client import VacuulaClient, VacuulaError
 from custom_components.vacuula.const import DOMAIN, GEN3, GEN4
 from custom_components.vacuula.coordinator import VacuulaCoordinator
 from custom_components.vacuula.data import RobotData
+from custom_components.vacuula.vacuum import VacuulaVacuum
+
+
+def paused_d5_state():
+    """The live D5 reply before an accepted, single sendToBase command."""
+    return {
+        "state": 3,
+        "action": 1,
+        "error": None,
+        "details": {"isDocked": False},
+        "availableCommands": {
+            "start": False,
+            "stop": True,
+            "pause": False,
+            "resume": True,
+            "goToBase": False,
+        },
+    }
 
 
 @pytest.fixture(params=[GEN3, GEN4])
@@ -73,6 +93,82 @@ async def test_active_cleaning_pauses_waits_confirms_then_docks(setup_robot):
     ]
     client.async_maps.assert_not_awaited()
     client.async_runs.assert_not_awaited()
+
+
+@pytest.mark.parametrize("setup_robot", [GEN3], indirect=True)
+async def test_confirmed_pause_can_dock_even_if_home_flag_stays_false(setup_robot):
+    """The app sends home after pausing; the D5 keeps goToBase=False."""
+    coordinator, robot, client, names = setup_robot
+    response = {"data": paused_d5_state()}
+    client.async_command.side_effect = [{}, response, {}, response]
+    with patch(
+        "custom_components.vacuula.coordinator.asyncio.sleep", new_callable=AsyncMock
+    ) as sleep:
+        await coordinator.async_return_to_base("robot")
+    sleep.assert_awaited_once_with(3.5)
+    assert client.async_command.await_args_list == [
+        command_call(names, action) for action in ("pause", "state", "home", "state")
+    ]
+
+
+@pytest.mark.parametrize("setup_robot", [GEN3], indirect=True)
+@pytest.mark.parametrize("platform", ["vacuum", "button"])
+async def test_already_paused_d5_can_return_home_with_consistent_readiness(
+    setup_robot, platform
+):
+    coordinator, robot, client, names = setup_robot
+    robot.state = paused_d5_state()
+    description = next(
+        item for item in DESCRIPTIONS if item.key == "can_return_to_base"
+    )
+    assert binary_value(robot, description) is True
+    button = VacuulaButton(coordinator, "robot", "return_to_base")
+    assert button.available
+    client.async_command.side_effect = [
+        {"data": paused_d5_state()},
+        {"result": "ok"},
+        {"data": {"state": 1, "action": 0, "details": {"isDocked": False}}},
+    ]
+    with patch(
+        "custom_components.vacuula.coordinator.asyncio.sleep", new_callable=AsyncMock
+    ) as sleep:
+        if platform == "button":
+            await button.async_press()
+        else:
+            await VacuulaVacuum(coordinator, "robot").async_return_to_base()
+    sleep.assert_not_awaited()
+    assert client.async_command.await_args_list == [
+        command_call(names, action) for action in ("state", "home", "state")
+    ]
+
+
+@pytest.mark.parametrize("setup_robot", [GEN3], indirect=True)
+@pytest.mark.parametrize("failure", ["read", "error", "busy", "resume", "docked"])
+async def test_cached_d5_pause_is_not_enough_to_override_a_false_home_flag(
+    setup_robot, failure
+):
+    coordinator, robot, client, names = setup_robot
+    robot.state = paused_d5_state()
+    fresh_state = paused_d5_state()
+    if failure == "read":
+        client.async_command.side_effect = VacuulaError("state failed")
+    else:
+        if failure == "error":
+            fresh_state.update(state=4, error="dustbin_missing")
+        elif failure == "busy":
+            fresh_state["state"] = 2
+        elif failure == "resume":
+            fresh_state["availableCommands"]["resume"] = False
+        else:
+            fresh_state["details"]["isDocked"] = True
+        client.async_command.return_value = {"data": fresh_state}
+        client.async_command.side_effect = None
+    with pytest.raises(HomeAssistantError) as error:
+        await coordinator.async_return_to_base("robot")
+    assert error.value.translation_key == (
+        "command_failed" if failure == "read" else "action_unavailable"
+    )
+    assert client.async_command.await_args_list == [command_call(names, "state")]
 
 
 async def test_direct_docking_does_not_pause_or_wait(setup_robot):

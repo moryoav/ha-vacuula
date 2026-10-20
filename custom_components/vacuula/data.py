@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from .const import GEN3
+
 
 @dataclass(slots=True)
 class RobotData:
@@ -23,6 +25,41 @@ class RobotData:
     # False once the server no longer lists the robot. Its cached data stays so
     # existing entities keep working until the user removes the device.
     listed: bool = True
+
+
+def gen3_paused_run_can_return_home(robot: RobotData) -> bool:
+    """Recognize the D5's resumable pause despite its false goToBase flag.
+
+    A live D5 accepts sendToBase in this state. The Vacuula app also sends it
+    after a successful pause without waiting for goToBase to become true.
+    """
+    commands = robot.state.get("availableCommands")
+    details = robot.state.get("details")
+    return (
+        robot.generation == GEN3
+        and robot.state.get("state") == 3
+        and robot.state.get("action") in (1, 2, 3, 6, 11, 12, 15)
+        and robot.state.get("error") is None
+        and isinstance(commands, dict)
+        and commands.get("resume") is True
+        and isinstance(details, dict)
+        and details.get("isDocked") is False
+    )
+
+
+def return_to_base_ready(robot: RobotData) -> bool | None:
+    """Combine native docking, pause-then-home and confirmed Gen3 paused runs."""
+    gen3 = robot.generation == GEN3
+    commands = robot.state.get("availableCommands" if gen3 else "available_commands")
+    if not isinstance(commands, dict):
+        return None
+    home = commands.get("goToBase" if gen3 else "return_to_base")
+    pause = commands.get("pause")
+    if home is True or pause is True or gen3_paused_run_can_return_home(robot):
+        return True
+    if home is False and pause is False:
+        return False
+    return None
 
 
 def response_data(response: dict[str, Any]) -> dict[str, Any]:

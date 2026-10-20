@@ -46,14 +46,18 @@ def cleaning_mode(coordinator: VacuulaCoordinator, serial: str) -> str:
 
 
 def start_payload(
-    coordinator: VacuulaCoordinator, serial: str, *, spot: bool = False
+    coordinator: VacuulaCoordinator,
+    serial: str,
+    *,
+    spot: bool = False,
+    category: str | None = None,
 ) -> dict[str, Any]:
     """Build a future cleaning action without changing the robot's live mode."""
     robot = coordinator.robots[serial]
     options = coordinator.cleaning_options.get(serial, {})
     mode = cleaning_mode(coordinator, serial)
     navigation = options.get("navigation_mode", "normal")
-    category = "spot" if spot else options.get("category", "auto")
+    category = "spot" if spot else category or options.get("category", "auto")
     if category in {"auto", "map"}:
         coordinator.validate_map_recovery(serial)
     target = cleaning_target(robot, category)
@@ -227,19 +231,21 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
         gen3_flag: str | None = None,
         gen4_flag: str | None = None,
     ) -> None:
-        if (
-            gen3_flag is not None
-            and self.command_allowed(gen3_flag, gen4_flag or gen3_flag) is False
-        ):
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="action_unavailable"
+        def build_command(robot: RobotData) -> dict[str, Any]:
+            if (
+                gen3_flag is not None
+                and self.command_allowed(gen3_flag, gen4_flag or gen3_flag) is False
+            ):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="action_unavailable"
+                )
+            return (
+                {"cmd": gen3_cmd}
+                if robot.generation == GEN3
+                else {"ability": gen4_ability}
             )
-        await self.coordinator.async_command(
-            self.serial,
-            {"cmd": gen3_cmd}
-            if self.robot.generation == GEN3
-            else {"ability": gen4_ability},
-        )
+
+        await self.coordinator.async_command(self.serial, build_command)
 
     async def async_start(self) -> None:
         if self.command_allowed("resume", "resume") is True:
@@ -249,20 +255,24 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="action_unavailable"
             )
-        if self.coordinator.cleaning_options.get(self.serial, {}).get(
-            "category"
-        ) not in {
-            "house",
-            "spot",
-        }:
-            await self.coordinator.async_refresh_maps(self.serial)
+
+        def build_command(robot: RobotData) -> dict[str, Any]:
+            # Another queued control may have started a run while this action
+            # waited. Do not send a second start using its previous readiness.
+            if self.command_allowed("start", "start") is False:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="action_unavailable"
+                )
+            return start_payload(self.coordinator, self.serial, category=category)
+
+        category = self.coordinator.cleaning_options.get(self.serial, {}).get(
+            "category", "auto"
+        )
         await self.coordinator.async_command(
             self.serial,
-            start_payload(self.coordinator, self.serial),
-            require_map_recovery=self.coordinator.cleaning_options.get(
-                self.serial, {}
-            ).get("category", "auto")
-            in {"auto", "map"},
+            build_command,
+            require_map_recovery=category in {"auto", "map"},
+            refresh_maps=category not in {"house", "spot"},
         )
 
     async def async_stop(self, **kwargs: Any) -> None:
@@ -288,9 +298,15 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="action_unavailable"
             )
-        await self.coordinator.async_command(
-            self.serial, start_payload(self.coordinator, self.serial, spot=True)
-        )
+
+        def build_command(robot: RobotData) -> dict[str, Any]:
+            if self.command_allowed("start", "start") is False:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="action_unavailable"
+                )
+            return start_payload(self.coordinator, self.serial, spot=True)
+
+        await self.coordinator.async_command(self.serial, build_command)
 
     async def async_set_fan_speed(self, fan_speed: str, **kwargs: Any) -> None:
         if fan_speed not in self.fan_speed_list:

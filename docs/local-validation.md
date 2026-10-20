@@ -1,11 +1,11 @@
 # Local validation, 20 October 2026
 
-Integration version: **0.1.5**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.6**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
 
 ## Automated checks
 
-- **656 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery and the protocol/state regressions below.
-- **99.63% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.98%**. Configuration flow coverage is **99.31%** and the discovery helper has **100%**.
+- **694 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery and the protocol/state regressions below.
+- **99.50% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 19 modules.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
@@ -23,13 +23,13 @@ $TEST_PYTHON -m ruff format --check .
 
 The installed test dependency versions are pinned in `requirements_test.txt`. Hassfest was run from the existing Home Assistant Core checkout with its development environment and an isolated Ruff 0.17.0 installation, matching the checkout's current requirement.
 
-## Read-only hardware verification
+## Initial read-only hardware verification
 
 The client connected to the existing Vacuula **1.0.0** app and one **Neato D5 / Gen3** robot. Server and robot event streams opened successfully. State, general information, preferences, schedule, maps and cleaning-history reads worked. The robot reported **docked**, **100% battery**, and **dustbin_missing**.
 
 The D5 explicitly returned `command_not_found` for `getLocalStats`. The integration records this as unsupported and continues normally. No maps or cleaning runs existed during this check.
 
-No cleaning, movement, preference, schedule, map-write, reset, firmware or provisioning command was sent to the physical robot. Movement and write behavior are covered using mocked transports and remain for the owner's physical testing. Gen4 protocol behavior is verified against the app source and fixtures, with hardware testing still pending.
+During this initial check, no cleaning, movement, preference, schedule, map-write, reset, firmware or provisioning command was sent to the physical robot. Later authorized control testing is recorded below. Gen4 protocol behavior is verified against the app source and fixtures, with hardware testing still pending.
 
 ## Installation
 
@@ -121,6 +121,47 @@ All 25 installed 0.1.4 files matched the tested source by SHA-256. Home Assistan
 The regression tests for these problems were checked to fail on the 0.1.4 code. All robot writes were tested with mocked transports; no movement, schedule, boundary, preference or reset command was sent to the physical robot. The Vacuula app was not modified.
 
 All 25 installed 0.1.5 files matched the committed source by SHA-256. Home Assistant configuration validation passed before and after copying. After one restart, the existing entry was **loaded**, a real diagnostics download confirmed runtime **0.1.5** without the robot serial or server URL, and the D5 remained connected and docked. The 37 existing entities kept their states, and the Generation 3 Alert sensor was added with the value `none`. The log showed no Vacuula warnings or errors apart from Home Assistant's standard custom-integration notice. The previous installation was backed up outside the source repository.
+
+## Independent review, 0.1.6
+
+The review compared the integration with Vacuula 1.0.0 source revision `bf18585`
+and used independent reviews of controls, services and entity lifecycle.
+Concurrency, registry, reconfiguration and numeric-response failures were
+reproduced before their fixes; the paused-home issue was found on the real D5.
+
+| Finding | Fix and regression evidence |
+| --- | --- |
+| A promotion could complete after map selection but before a queued cleaning/schedule command, leaving that command mapless | Deferred builders refresh and choose maps under the command lock. Concurrency tests cover vacuum, advanced cleaning and schedule creation/edits. |
+| Native readiness and connection checks became stale while waiting for the command lock | Start, Pause, Stop, Resume, spot cleaning, exploration and docking validate at execution; queued disconnect and changed-readiness tests prevent invalid sends. |
+| The real D5 kept `goToBase: false` during a resumable paused run, so the integration refused the app's home sequence | A Gen3-only exception requires fresh, error-free, resumable paused state. Tests use the observed response and reject failed reads, errors, busy/docked states and non-resumable runs. |
+| Disabled map and event entities never ran their own deletion callbacks | Platform listeners reconcile registry records even when disabled. Real HA tests cover deletion/return, rapid transitions, preserved disable preferences and robot isolation. |
+| Manual reconfiguration could duplicate a unique ID held by an ignored discovery | Preserve the original entry ID while updating its URL; regression verifies one owner per unique ID and keeps the ignored entry intact. |
+| Invalid map IDs could create bogus image entities | Image discovery accepts only nonempty string IDs. |
+| JSON exponent overflow bypassed rejection of non-finite response values | Finite-number parsing rejects overflow for HTTP and SSE; finite exponents remain supported. |
+
+Gen4 behavior and saved-map commands remain source-verified and fixture-tested;
+no Gen4 hardware is available on this installation. The Vacuula app is unchanged.
+
+### Authorized D5 control test
+
+Locate, Start, Pause and the Resume button were acknowledged through Home
+Assistant. Fresh reads confirmed idle/docked → cleaning/off dock → paused →
+cleaning. The native return-home sequence then paused but refused the false
+`goToBase` flag. A fresh read confirmed state `3`, action `1`, `resume: true`,
+`pause: false`, `goToBase: false`, no error and not docked. The exact app
+`sendToBase` request was sent once and returned `result: ok`.
+
+The subsequent robot state was idle/off dock, with `dockHasBeenSeen: false` and
+no error. Successful physical docking was not confirmed. The integration does
+not report returning or docked based only on command acknowledgement. The
+paused-run fix is covered against this live response by regression tests;
+Gen4 and saved-map writes remain mocked. No preferences, schedules, boundaries,
+firmware, reset or provisioning settings were changed on the physical robot.
+
+All 25 final 0.1.6 component files matched the tested source by SHA-256.
+Configuration validation passed, and a restart loaded 0.1.6 successfully with
+the D5 connected. The original 0.1.5 installation was backed up outside Git.
+Final telemetry continued to report idle/off dock with no error.
 
 ## Quality target
 

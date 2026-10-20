@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from typing import Any
@@ -47,9 +48,20 @@ def _nonfinite(value: str) -> None:
     raise ValueError("Non-finite JSON number")
 
 
+def _finite_float(value: str) -> float:
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("Non-finite JSON number")
+    return result
+
+
 def _decode_json(raw: bytes) -> Any:
     try:
-        return json.loads(raw.decode("utf-8-sig"), parse_constant=_nonfinite)
+        return json.loads(
+            raw.decode("utf-8-sig"),
+            parse_constant=_nonfinite,
+            parse_float=_finite_float,
+        )
     except (UnicodeError, ValueError, RecursionError) as err:
         raise VacuulaError("Invalid JSON response") from err
 

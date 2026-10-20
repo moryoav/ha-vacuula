@@ -386,9 +386,14 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         entry
                     ):
                         aliases.update(entry_aliases(entry))
+                    owner = self.hass.config_entries.async_entry_for_domain_unique_id(
+                        DOMAIN, base_url
+                    )
                     return self.async_update_reload_and_abort(
                         entry,
-                        unique_id=base_url,
+                        unique_id=base_url
+                        if owner is None or owner.entry_id == entry.entry_id
+                        else entry.unique_id,
                         data_updates={
                             CONF_URL: base_url,
                             "robot_ids": robot_ids,

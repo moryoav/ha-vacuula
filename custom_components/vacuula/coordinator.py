@@ -11,19 +11,33 @@ from datetime import timedelta
 from time import monotonic
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .client import CannotConnect, UnsupportedCommand, VacuulaClient, VacuulaError
 from .const import DOMAIN, GEN3, GEN4
-from .data import RobotData, gen3_paused_run_can_return_home, response_data
+from .data import RobotData, response_data, track_return_trip
 
 _LOGGER = logging.getLogger(__name__)
+
+# Commands after which the robot drives off. The D5 sends one state event as it
+# leaves the dock, while pause is still unavailable and charging is reported,
+# and no event when those flags change a few seconds later.
+MOTION_COMMANDS = {
+    "startCleaning",
+    "resumeCleaning",
+    "startPersistentMapExploration",
+    "sendToBase",
+    "cleaning.start",
+    "cleaning.resume",
+    "navigation.return_to_base",
+}
+FOLLOW_UP_DELAY = 10
 
 
 class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
@@ -66,6 +80,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         self._unsupported: set[tuple[str, str]] = set()
         self._robot_failures: set[str] = set()
         self._remove_poll: Callable[[], None] | None = None
+        self._follow_ups: dict[str, Callable[[], None]] = {}
         # Unique IDs already added, per platform module and robot serial. Kept
         # here so a removed device or record can be added again when it returns.
         self.known_entities: dict[str, dict[str, set[str]]] = {}
@@ -211,6 +226,9 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         if self._remove_poll:
             self._remove_poll()
             self._remove_poll = None
+        for cancel in self._follow_ups.values():
+            cancel()
+        self._follow_ups.clear()
         tasks = list(self._streams.values())
         if self._server_stream:
             tasks.append(self._server_stream)
@@ -280,7 +298,12 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 else:
                     robot.state[key] = value
             self._update_capabilities(robot)
+            track_return_trip(robot)
             self.async_set_updated_data(self.robots)
+            if robot.state.get("state") in (2, "busy"):
+                # Runs started by the app, a schedule or the robot itself also
+                # leave the dock with stale flags and no later event.
+                self._schedule_state_follow_up(serial)
 
     async def _async_optional(
         self, robot: RobotData, command: str
@@ -308,6 +331,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 await self.client.async_command(robot.serial, command)
             )
             self._update_capabilities(robot)
+            track_return_trip(robot)
             if robot.serial in self._robot_failures:
                 _LOGGER.info("Vacuula robot connection recovered")
                 self._robot_failures.remove(robot.serial)
@@ -351,6 +375,10 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 if (value := await self._async_optional(robot, query)) is not None:
                     if attribute == "info":
                         robot.info.update(value)
+                    elif attribute == "preferences" and robot.generation == GEN4:
+                        # The language list comes from a separate read below;
+                        # keep it when only that read fails.
+                        robot.preferences.update(value)
                     else:
                         setattr(robot, attribute, value)
             if robot.generation == GEN4:
@@ -745,7 +773,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 )
                 if len(matches) != 1:
                     raise ServiceValidationError(
-                        translation_domain=DOMAIN, translation_key="action_unavailable"
+                        translation_domain=DOMAIN, translation_key="event_not_found"
                     )
                 command = {
                     "ability": "scheduling.update",
@@ -779,7 +807,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 if require_map_recovery:
                     self.validate_map_recovery(serial)
                 if callable(command):
-                    command = command(self.robots[serial])
+                    command = await self._async_build_command_locked(serial, command)
                 if command.get("cmd") == "setPreferences":
                     # Read and merge under the same lock as the write so two
                     # settings actions cannot revert each other's changes.
@@ -825,9 +853,62 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 raise HomeAssistantError(
                     translation_domain=DOMAIN, translation_key="command_failed"
                 ) from err
+        if (command.get("cmd") or command.get("ability")) in MOTION_COMMANDS:
+            self._schedule_state_follow_up(serial)
         if refresh:
             self.async_update_listeners()
         return result
+
+    async def _async_build_command_locked(
+        self, serial: str, build: Callable[[RobotData], dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Build a deferred command, confirming a readiness refusal first.
+
+        Readiness flags can change without a state event, for example when
+        pause becomes available a few seconds after the robot leaves the dock.
+        A refusal based on cached flags is therefore checked once against a
+        fresh state read before it is reported.
+        """
+        robot = self.robots[serial]
+        try:
+            return build(robot)
+        except ServiceValidationError as err:
+            if err.translation_key != "action_unavailable":
+                raise
+            if not await self._async_read_state_locked(robot):
+                raise
+            self.async_update_listeners()
+            return build(robot)
+
+    @callback
+    def _schedule_state_follow_up(self, serial: str) -> None:
+        """Read state again a few seconds after the robot starts driving."""
+        if (cancel := self._follow_ups.pop(serial, None)) is not None:
+            cancel()
+        if self._stopping or self.entry.state is not ConfigEntryState.LOADED:
+            return
+
+        @callback
+        def run(_now: Any) -> None:
+            """Start the follow-up read unless the integration is unloading."""
+            self._follow_ups.pop(serial, None)
+            if self._stopping or not (
+                serial in self.robots and self.robots[serial].connected
+            ):
+                return
+            self.entry.async_create_background_task(
+                self.hass,
+                self._async_state_follow_up(serial),
+                f"Vacuula state follow-up {serial}",
+            )
+
+        self._follow_ups[serial] = async_call_later(self.hass, FOLLOW_UP_DELAY, run)
+
+    async def _async_state_follow_up(self, serial: str) -> None:
+        """Refresh state under the robot lock and notify entities."""
+        async with self._lock(serial):
+            if await self._async_read_state_locked(self.robots[serial]):
+                self.async_update_listeners()
 
     async def async_return_to_base(self, serial: str) -> None:
         """Pause an active run before docking, without interleaved robot commands."""
@@ -861,6 +942,16 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
         async with self._lock(serial):
             self._require_robot_connection(serial)
             try:
+                if command_allowed("pause") is not True and (
+                    command_allowed(home_flag) is False
+                ):
+                    # The flags can change without a state event (pause becomes
+                    # available a few seconds after leaving the dock). Confirm a
+                    # refusal against a fresh read first.
+                    if not await self._async_read_state_locked(robot):
+                        raise HomeAssistantError(
+                            translation_domain=DOMAIN, translation_key="command_failed"
+                        )
                 if command_allowed("pause") is True:
                     await self.client.async_command(serial, pause)
                     await asyncio.sleep(3.5)
@@ -868,25 +959,30 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                         raise HomeAssistantError(
                             translation_domain=DOMAIN, translation_key="command_failed"
                         )
-                elif command_allowed(
-                    home_flag
-                ) is False and gen3_paused_run_can_return_home(robot):
-                    # A cached paused run can have ended while this request was
-                    # queued. Confirm it before overriding the firmware flag.
-                    if not await self._async_read_state_locked(robot):
-                        raise HomeAssistantError(
-                            translation_domain=DOMAIN, translation_key="command_failed"
-                        )
-                if command_allowed(home_flag) is False and not (
-                    gen3_paused_run_can_return_home(robot)
-                ):
+                if command_allowed(home_flag) is False:
+                    # On the live D5, sendToBase in this state was acknowledged
+                    # but ended the run where the robot stood instead of
+                    # docking it, so the robot's own flag is followed.
+                    details = robot.state.get("details")
                     raise ServiceValidationError(
-                        translation_domain=DOMAIN, translation_key="action_unavailable"
+                        translation_domain=DOMAIN,
+                        translation_key="base_not_found"
+                        if robot.generation == GEN3
+                        and isinstance(details, dict)
+                        and details.get("isDocked") is False
+                        and details.get("dockHasBeenSeen") is False
+                        else "action_unavailable",
                     )
                 self._require_robot_connection(serial)
+                # The D5's "recovering location" event usually arrives before
+                # the command returns, so mark the trip before sending it.
+                robot.returning = robot.generation == GEN3
                 await self.client.async_command(serial, home)
                 await self._async_read_state_locked(robot)
+                robot.returning = robot.generation == GEN3
+                self._schedule_state_follow_up(serial)
             except VacuulaError as err:
+                robot.returning = False
                 raise HomeAssistantError(
                     translation_domain=DOMAIN, translation_key="command_failed"
                 ) from err

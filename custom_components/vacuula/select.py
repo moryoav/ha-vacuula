@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, GEN3
 from .coordinator import VacuulaCoordinator
 from .data import RobotData
-from .entity import VacuulaEntity, async_add_robot_entities, value_at
+from .entity import VacuulaEntity, async_add_robot_entities
 from .vacuum import cleaning_mode, fan_modes
 
 PARALLEL_UPDATES = 0
@@ -87,17 +87,16 @@ class VacuulaSelect(VacuulaEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        """Read a valid saved default or derive the choice from robot telemetry."""
+        """Read a valid saved default, or the value the next run would use."""
         defaults = self.coordinator.cleaning_options.get(self.serial, {})
         if self.key == "cleaning_mode":
             return cleaning_mode(self.coordinator, self.serial)
         if self.key == "navigation_mode":
             if configured := defaults.get("navigation_mode"):
                 return configured if configured in self.options else None
-            if self.robot.generation == GEN3:
-                return {1: "normal", 2: "extra_care", 3: "deep"}.get(
-                    value_at(self.robot.state, "cleaning", "navigationMode"), "normal"
-                )
+            # Runs started from Home Assistant use Normal until a default is
+            # chosen, as in the Vacuula app. The last run's navigation is shown
+            # by the Active navigation mode sensor instead.
             return "normal"
         if self.key == "cleaning_category":
             value = defaults.get("category", "auto")

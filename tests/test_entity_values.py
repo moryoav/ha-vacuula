@@ -503,8 +503,11 @@ async def test_map_toggle_preserves_name_and_missing_map(coordinator):
     robot.maps = []
     assert not entity.available
     assert entity.is_on is None
+    # An unknown map list keeps the last known name; a map never seen uses its ID.
     entity._update_name()
-    assert entity.translation_placeholders == {"map_name": "map-id"}
+    assert entity.translation_placeholders == {"map_name": "Floor name"}
+    unseen = VacuulaMapSwitch(coordinator, "robot", "other-id")
+    assert unseen.translation_placeholders == {"map_name": "other-id"}
     with pytest.raises(ServiceValidationError):
         await entity.async_turn_on()
 

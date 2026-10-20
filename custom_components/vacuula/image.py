@@ -150,7 +150,11 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
         return DeviceInfo(identifiers={(DOMAIN, self.serial)})
 
     def _update_map_name(self) -> None:
-        """Refresh the translated entity name from the current stored map name."""
+        """Refresh the translated entity name from the current stored map name.
+
+        While the map list is unknown (an upload in progress, a failed read or
+        an unlisted robot) the last known name is kept.
+        """
         robot = self.coordinator.robots[self.serial]
         name = next(
             (
@@ -158,8 +162,12 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
                 for m in robot.maps
                 if str(m.get("id")) == self.map_id
             ),
-            "Floor",
+            None,
         )
+        if name is None:
+            if getattr(self, "_attr_translation_placeholders", None):
+                return
+            name = "Floor"
         set_name_placeholders(self, {"map_name": name})
 
     @property

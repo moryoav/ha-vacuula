@@ -15,7 +15,9 @@ The [upstream project](https://github.com/vacuula/vacuula) remains the authority
 for its own protocol; these notes describe the reviewed interface, not a stable
 API guarantee.
 
-D5 state and optional telemetry were verified with read-only requests.
+D5 state, telemetry, Locate, Start, Pause, Resume, Stop, spot cleaning, return
+to base, preference changes and Gen3 schedule writes were exercised on the live
+robot; see the [local validation](local-validation.md).
 Generation 4 behavior is source-verified and fixture-tested, without hardware
 verification. Generation 3 multi-boundary cleaning was explicitly questioned in
 the app source; this integration accepts only a single `boundaryId`.
@@ -126,11 +128,26 @@ Explicit house and spot controls remain mapless.
 Returning to base pauses a pausable run, waits 3.5 seconds and re-reads command
 readiness before sending the docking command. The entire sequence holds the
 robot lock; failed pause, state read or cancellation prevents the later command.
-The live D5 accepted `sendToBase` while a fresh error-free paused run still
-reported `goToBase: false` and `resume: true`. A Gen3-only override allows that
-verified resumable cleaning/exploration state, including an already-paused run.
-Busy, errored, docked or non-resumable false-flag states remain rejected.
+When `goToBase` (Gen4 `return_to_base`) is still false, the command is refused
+and the run stays paused. The Vacuula app (`home.tsx`) disables its home button
+for a robot that is already paused in that state, but after its own pause it
+sends `sendToBase` without checking the flag again. On the live D5, `sendToBase`
+in that state was acknowledged but ended the run idle off the dock, with
+`dockHasBeenSeen: false` each time, so the integration follows the flag; the
+refusal names the missing base when the robot is off its dock.
 No activity or docking result is inferred from an acknowledgement.
+
+The D5 sends a state event when its state changes or when it touches the dock,
+but not when command flags or the action change within a run. Pause becomes
+available and charging ends a few seconds after it leaves the dock, and a robot
+sent home switches from recovering location (action 9) to docking (action 4)
+without an event. The integration therefore confirms a Pause, Stop or Return
+to base refusal based on cached readiness with one fresh state read, and reads
+state again 10 seconds after a start, resume, exploration or return to base and
+after any event that reports the robot busy. It also reports action 9 as
+returning after it sent a Gen3 robot home, until the robot's state shows the
+trip ended; the trip is marked before `sendToBase` because the robot's event
+usually arrives before the command returns.
 
 Generation 3 preference writes read and merge the full preferences object under
 the same lock as the write before
@@ -185,7 +202,8 @@ The read API has no field that tells a failed upload from a deliberate
 demotion: both leave the floorplan `promoted=False`. After this integration's
 own upload fails, a demoted floorplan therefore keeps the pending marker, a
 Repairs notice naming the robot and map ID, and the block on new Automatic or
-mapped starts and mapped schedule commands, so Automatic does not quietly run
+mapped starts and mapped schedule commands (switching a mapped event on
+included; switching one off stays allowed), so Automatic does not quietly run
 without the edited no-go zones. Fresh map reads clear it when a floorplan is
 promoted again (here or in the app), another floorplan is active, or the map is
 no longer in use; demotion through `map_action` and robot removal also clear it.
@@ -241,7 +259,8 @@ and SSE frames to 2 MiB. Invalid JSON and non-finite JSON numbers are rejected.
 
 Robot commands are serialized per robot. Cleaning and schedule payload builders
 refresh and select maps inside the lock before sending; native control readiness
-and connection checks also run after acquiring it. This prevents a completed
+and connection checks also run after acquiring it, and a readiness refusal is
+confirmed with one fresh state read. This prevents a completed
 promotion or earlier command from being followed by a stale queued target or
 readiness decision. Commands are never retried automatically,
 including after a timeout, because execution might already have occurred.

@@ -25,37 +25,38 @@ class RobotData:
     # False once the server no longer lists the robot. Its cached data stays so
     # existing entities keep working until the user removes the device.
     listed: bool = True
+    # True after this integration sent a Gen3 robot home, until the robot
+    # leaves the trip. The D5 reports the first part of the trip as
+    # "recovering location" (action 9), the same code it uses while cleaning.
+    returning: bool = False
 
 
-def gen3_paused_run_can_return_home(robot: RobotData) -> bool:
-    """Recognize the D5's resumable pause despite its false goToBase flag.
+def track_return_trip(robot: RobotData) -> None:
+    """End a tracked trip home once the robot is no longer driving to its base."""
+    if robot.returning and not (
+        robot.state.get("state") == 2 and robot.state.get("action") in (4, 9)
+    ):
+        robot.returning = False
 
-    A live D5 accepts sendToBase in this state. The Vacuula app also sends it
-    after a successful pause without waiting for goToBase to become true.
-    """
-    commands = robot.state.get("availableCommands")
-    details = robot.state.get("details")
-    return (
-        robot.generation == GEN3
-        and robot.state.get("state") == 3
-        and robot.state.get("action") in (1, 2, 3, 6, 11, 12, 15)
-        and robot.state.get("error") is None
-        and isinstance(commands, dict)
-        and commands.get("resume") is True
-        and isinstance(details, dict)
-        and details.get("isDocked") is False
+
+def event_targets_map(event: dict[str, Any]) -> bool:
+    """Return whether a Gen4 schedule event has a run that targets a floorplan."""
+    command = event.get("command")
+    runs = command.get("runs") if isinstance(command, dict) else None
+    return isinstance(runs, list) and any(
+        isinstance(run, dict) and isinstance(run.get("map"), dict) for run in runs
     )
 
 
 def return_to_base_ready(robot: RobotData) -> bool | None:
-    """Combine native docking, pause-then-home and confirmed Gen3 paused runs."""
+    """Combine native docking with the pause-then-home sequence."""
     gen3 = robot.generation == GEN3
     commands = robot.state.get("availableCommands" if gen3 else "available_commands")
     if not isinstance(commands, dict):
         return None
     home = commands.get("goToBase" if gen3 else "return_to_base")
     pause = commands.get("pause")
-    if home is True or pause is True or gen3_paused_run_can_return_home(robot):
+    if home is True or pause is True:
         return True
     if home is False and pause is False:
         return False

@@ -9,7 +9,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.vacuula.button import VacuulaButton
-from custom_components.vacuula.client import VacuulaClient
+from custom_components.vacuula.client import VacuulaClient, VacuulaError
 from custom_components.vacuula.const import DOMAIN, GEN3, GEN4
 from custom_components.vacuula.coordinator import VacuulaCoordinator
 from custom_components.vacuula.data import RobotData
@@ -36,6 +36,26 @@ def coordinator(hass):
         },
     )
     return coordinator
+
+
+def answer_state_reads(coordinator):
+    """Answer state reads with the robot's cached state, as the live robot would."""
+    robot = coordinator.robots["robot"]
+
+    async def command(serial, payload):
+        """Return the cached state for reads and acknowledge anything else."""
+        if payload.get("cmd") == "getRobotState":
+            return {"result": "ok", "data": deepcopy(robot.state)}
+        if payload.get("ability") == "state.show":
+            return {"code": 200, "body": deepcopy(robot.state)}
+        return {"result": "ok"} if "cmd" in payload else {"code": 200, "body": {}}
+
+    coordinator.client.async_command.side_effect = command
+
+
+def sent_payloads(coordinator):
+    """List every payload sent to the robot, in order."""
+    return [item.args[1] for item in coordinator.client.async_command.await_args_list]
 
 
 async def test_start_never_uses_a_target_from_before_a_queued_promotion(coordinator):
@@ -167,6 +187,7 @@ async def test_disconnect_during_map_read_does_not_send_a_clean_command(coordina
 async def test_queued_native_controls_recheck_readiness(coordinator, action, platform):
     """Reject queued vacuum and button actions whose readiness flag changed."""
     robot = coordinator.robots["robot"]
+    answer_state_reads(coordinator)
     flag = "cancel" if action == "stop" else action
     robot.state["available_commands"][flag] = True
     lock = coordinator._lock("robot")
@@ -186,7 +207,8 @@ async def test_queued_native_controls_recheck_readiness(coordinator, action, pla
     with pytest.raises(ServiceValidationError) as error:
         await task
     assert error.value.translation_key == "action_unavailable"
-    coordinator.client.async_command.assert_not_awaited()
+    # Only the fresh read that confirms the refusal reaches the robot.
+    assert sent_payloads(coordinator) == [{"ability": "state.show"}]
 
 
 async def test_queued_return_home_rechecks_connection(coordinator):
@@ -210,6 +232,7 @@ async def test_queued_return_home_rechecks_connection(coordinator):
 async def test_queued_mapping_or_spot_control_rechecks_readiness(coordinator, action):
     """Recheck Start readiness before queued Gen3 exploration or spot cleaning."""
     robot = coordinator.robots["robot"]
+    answer_state_reads(coordinator)
     robot.generation = GEN3
     robot.capabilities = {"spotCleaning": "basic-1", "maps": "advanced-1"}
     robot.state = {
@@ -230,4 +253,42 @@ async def test_queued_mapping_or_spot_control_rechecks_readiness(coordinator, ac
     with pytest.raises(ServiceValidationError) as error:
         await task
     assert error.value.translation_key == "action_unavailable"
-    coordinator.client.async_command.assert_not_awaited()
+    assert sent_payloads(coordinator) == [{"cmd": "getRobotState"}]
+
+
+@pytest.mark.parametrize("action", ["pause", "stop"])
+async def test_stale_refusal_is_confirmed_with_a_fresh_read(coordinator, action):
+    """Send a control the robot allows although the cached flag still refuses it.
+
+    The D5 announces leaving the dock with pause unavailable and sends no event
+    when pause becomes available a few seconds later.
+    """
+    robot = coordinator.robots["robot"]
+    flag = "cancel" if action == "stop" else action
+    robot.state["available_commands"][flag] = False
+    live = deepcopy(robot.state)
+    live["available_commands"][flag] = True
+
+    async def command(serial, payload):
+        """Report the live flags that no event announced."""
+        if payload.get("ability") == "state.show":
+            return {"code": 200, "body": deepcopy(live)}
+        return {"code": 200, "body": {}}
+
+    coordinator.client.async_command.side_effect = command
+    await getattr(VacuulaVacuum(coordinator, "robot"), f"async_{action}")()
+    ability = "cleaning.pause" if action == "pause" else "cleaning.cancel"
+    assert sent_payloads(coordinator)[:2] == [
+        {"ability": "state.show"},
+        {"ability": ability},
+    ]
+
+
+async def test_failed_confirmation_read_keeps_the_refusal(coordinator):
+    """Report the cached refusal when the confirming read itself fails."""
+    coordinator.robots["robot"].state["available_commands"]["pause"] = False
+    coordinator.client.async_command.side_effect = VacuulaError("no answer")
+    with pytest.raises(ServiceValidationError) as error:
+        await VacuulaVacuum(coordinator, "robot").async_pause()
+    assert error.value.translation_key == "action_unavailable"
+    assert sent_payloads(coordinator) == [{"ability": "state.show"}]

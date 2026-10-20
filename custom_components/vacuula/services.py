@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from .client import VacuulaError
 from .const import DOMAIN, GEN3, GEN4
 from .coordinator import VacuulaCoordinator
-from .data import RobotData, response_data
+from .data import RobotData, event_targets_map, response_data
 from .vacuum import cleaning_target
 
 _IDENTIFIER = vol.All(
@@ -139,7 +139,7 @@ def _clean_command(
     if zones and map_id is None:
         raise _error("map_required")
     if map_id and data.get("cleaning_type") == "house":
-        raise _error("invalid_option")
+        raise _error("house_with_map")
     target = (
         cleaning_target(
             robot, data.get("cleaning_type", "auto"), require_dock=require_dock
@@ -252,7 +252,7 @@ def _merge_schedule_event(
     map_id = changes.get("map_id")
     cleaning_type = changes.get("cleaning_type")
     if cleaning_type == "house" and (map_id or changes.get("zone_ids")):
-        raise _error("invalid_option")
+        raise _error("house_with_map")
     if map_id is not None:
         target: dict[str, Any] | None = {
             "rank_id": map_id,
@@ -449,13 +449,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                         ):
                             coordinator.validate_map_recovery(serial)
                         event = _merge_schedule_event(robot, event, data)
-                        command = event.get("command", {})
-                        runs = (
-                            command.get("runs") if isinstance(command, dict) else None
-                        )
-                        if isinstance(runs, list) and any(
-                            isinstance(run, dict) and isinstance(run.get("map"), dict)
-                            for run in runs
+                        # A disabled event cannot run, so turning a mapped event
+                        # off stays possible during floorplan recovery.
+                        if event.get("enabled") is not False and event_targets_map(
+                            event
                         ):
                             coordinator.validate_map_recovery(serial)
                         return event

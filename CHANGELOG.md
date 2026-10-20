@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.9
+
+- Stopped sending a Generation 3 robot home while it reports `goToBase: false`. On the D5 that command ended the run where the robot stood instead of docking it. The run now stays paused, and the error says when the robot has not found its base during the run.
+- Pause, Stop and Return to base are no longer refused for up to a minute after a start. A refusal based on cached readiness is now checked once against a fresh state read, and the state, including button availability, is read again 10 seconds after the robot starts driving, also for runs started by the app, a schedule or the robot.
+- Showed Returning for the whole trip after Home Assistant sends a Generation 3 robot home, instead of Cleaning while the robot recovers its location.
+- Showed Normal in the Navigation mode select until a default is chosen, matching what Start sends.
+- Kept the Generation 4 robot language select working when only its language read fails.
+- Kept map image and map switch names while the map list is temporarily unknown.
+- Allowed turning a mapped Generation 4 schedule event off during floorplan recovery, and blocked switching one on with its switch.
+- Clearer errors for unknown schedule-event IDs, whole-home cleaning combined with a map or zones, and reminder values between the allowed steps.
+
 ## 0.1.8
 
 - Bundled official Vacuula branding as transparent 256- and 512-pixel icons, with automatic logo and dark-theme fallbacks in Home Assistant.

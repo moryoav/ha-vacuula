@@ -154,7 +154,13 @@ class VacuulaNumber(VacuulaEntity, NumberEntity):
             or abs((value - minimum) / step - round((value - minimum) / step)) > 1e-8
         ):
             raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="invalid_option"
+                translation_domain=DOMAIN,
+                translation_key="invalid_number",
+                translation_placeholders={
+                    "min": f"{minimum:g}",
+                    "max": f"{maximum:g}",
+                    "step": f"{step:g}",
+                },
             )
         if desc.preference is None:
             await self.coordinator.async_set_cleaning_option(

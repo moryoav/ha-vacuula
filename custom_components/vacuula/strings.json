@@ -52,6 +52,18 @@
     "invalid_option": {
       "message": "This setting is not supported by the robot."
     },
+    "base_not_found": {
+      "message": "The robot has not found its base during this run, so it cannot return to it. A clean in progress is left paused. Let it clean until it passes its base, or carry it back."
+    },
+    "event_not_found": {
+      "message": "No schedule event on the robot has this ID, or the ID is not unique. Read the current IDs with vacuula.get_data (resource: schedule)."
+    },
+    "house_with_map": {
+      "message": "Whole-home cleaning cannot be combined with a map ID or zone IDs."
+    },
+    "invalid_number": {
+      "message": "Choose a value from {min} to {max} in steps of {step}."
+    },
     "offline": {
       "message": "The robot is offline. Check its connection in Vacuula."
     },
@@ -119,7 +131,7 @@
   "issues": {
     "map_promotion_required": {
       "title": "Floorplan upload not confirmed for {robot}",
-      "description": "The last floorplan upload for {robot} (map `{map_id}`) was not confirmed. Vacuula demotes the active floorplan before uploading its replacement, so the robot may be left without an active floorplan and its no-go zones.\n\nTo restore it, promote the floorplan again in the Vacuula app, or run `vacuula.map_action` with this map ID and `action: promote`. To continue without it, run `vacuula.map_action` with `action: demote`. This notice clears once a floorplan is active again, the map is demoted with the action or no longer in use, or the robot is removed.\n\nUntil then, Automatic and mapped starts and mapped schedule changes from Home Assistant are blocked. Explicit whole-home cleaning remains available. The integration does not retry robot commands automatically. Existing robot schedules and controls outside Home Assistant are not blocked."
+      "description": "The last floorplan upload for {robot} (map `{map_id}`) was not confirmed. Vacuula demotes the active floorplan before uploading its replacement, so the robot may be left without an active floorplan and its no-go zones.\n\nTo restore it, promote the floorplan again in the Vacuula app, or run `vacuula.map_action` with this map ID and `action: promote`. To continue without it, run `vacuula.map_action` with `action: demote`. This notice clears once a floorplan is active again, the map is demoted with the action or no longer in use, or the robot is removed.\n\nUntil then, Automatic and mapped starts and mapped schedule changes from Home Assistant are blocked. Explicit whole-home cleaning remains available, and mapped schedule events can still be turned off. The integration does not retry robot commands automatically. Existing robot schedules and controls outside Home Assistant are not blocked."
     }
   },
   "entity": {

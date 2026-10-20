@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, GEN3
 from .coordinator import VacuulaCoordinator
-from .data import RobotData, gen3_paused_run_can_return_home
+from .data import RobotData
 from .entity import VacuulaEntity, async_add_robot_entities
 from .vacuum import VacuulaVacuum
 
@@ -84,7 +84,6 @@ class VacuulaButton(VacuulaEntity, ButtonEntity):
             return (
                 self.command_allowed("goToBase", "return_to_base") is not False
                 or self.command_allowed("pause", "pause") is True
-                or gen3_paused_run_can_return_home(self.robot)
             )
         if self.key in COMMANDS:
             _cmd, _ability, gen3_flag, gen4_flag = COMMANDS[self.key]

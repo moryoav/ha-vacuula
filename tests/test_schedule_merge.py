@@ -273,7 +273,7 @@ async def test_missing_or_ambiguous_event_never_creates_or_overwrites(
     server["events"] = events
     with pytest.raises(ServiceValidationError) as error:
         await call(hass, schedule_setup, time="12:34")
-    assert error.value.translation_key == "action_unavailable"
+    assert error.value.translation_key == "event_not_found"
     assert writes == []
     coordinator.client.async_command.assert_awaited_once_with(
         "TEST-robot", {"ability": "scheduling.show"}
@@ -403,7 +403,7 @@ async def test_explicit_whole_home_with_map_or_zones_is_rejected(
     """Reject conflicting whole-home and mapped target selections without writing."""
     with pytest.raises(ServiceValidationError) as error:
         await call(hass, schedule_setup, cleaning_type="house", **changes)
-    assert error.value.translation_key == "invalid_option"
+    assert error.value.translation_key == "house_with_map"
     assert schedule_setup[4] == []
 
 

@@ -34,17 +34,17 @@ The test environment pins **Home Assistant 2026.10.2**, Python 3.14, and
 `pytest-homeassistant-custom-component` in `requirements_test.txt`. Tests cover
 the client, config flow, coordinator, integration lifecycle, actions, images,
 diagnostics, and regression cases. The [local validation](local-validation.md)
-records 711 passing tests, 99.50% combined line and branch coverage, at least
-97.12% in every module, 99.32% config-flow coverage, and clean strict mypy
+records 730 passing tests, 99.65% combined line and branch coverage, at least
+98.56% in every module, 99.32% config-flow coverage, and clean strict mypy
 results for all 19 integration modules. Local coverage rules are marked `done`.
 The strict-typing rule remains `todo` for separate client packaging and formal
 Core registration.
 
-D5 hardware checks include telemetry, Locate, Start, Pause, Resume and a short
-cleaning run followed by Home Assistant's Return to base action. Fresh reads
-confirmed automatic docking after the pause-then-home sequence. Preference
-changes, schedule writes, map changes, log uploads and factory reset were not
-exercised on hardware. Generation 4 remains source-verified and fixture-tested.
+D5 hardware checks include telemetry, Locate, Start, Pause, Resume, Stop, spot
+cleaning, preference changes, Gen3 schedule writes and Home Assistant's Return
+to base action. Fresh reads confirmed docking after the pause-then-home sequence
+whenever the robot had seen its base during the run. Map changes, log uploads
+and factory reset were not exercised on hardware. Generation 4 remains source-verified and fixture-tested.
 The local test suite uses mocked transports and does not contact the robot.
 
 ## Work before a formal claim

@@ -1,13 +1,13 @@
 # Local validation, 20 October 2026
 
-Integration version: **0.1.8**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
+Integration version: **0.1.9**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux.
 
 ## Automated checks
 
-- **711 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery, docstring enforcement and the protocol/state regressions below.
-- **99.50% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
+- **730 tests passed**, including real Home Assistant platform loading for both protocol generations, native entity services, reloading, unloading, late discovery, offline maps, reconnection, error handling, concurrent preference and schedule writes, manual setup discovery, docstring enforcement and the protocol/state regressions below.
+- **99.65% combined line and branch coverage** across all 19 integration modules. The lowest module is **98.56%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 21 integration and tool modules.
-- **100% docstring coverage: 779/779 items in 55 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
+- **100% docstring coverage: 817/817 items in 56 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
 - Actionlint: **passed**, GitHub workflow syntax and expressions validated.
@@ -228,6 +228,49 @@ test coverage remain applicable: no Python implementation or test code changed
 in this branding update. Docstring coverage remains 779/779 items, or 100%.
 The 0.1.7 installation was backed up outside Git, and configuration validation
 passed before and after installing all 30 component files.
+
+## Live D5 control review, 0.1.9
+
+An authorized test of the D5 on 20 October 2026 ran Home Assistant 0.1.8
+controls while sampling Home Assistant states, fresh `getRobotState` reads and
+the robot's Vacuula event stream.
+
+| Control | Result on the D5 |
+| --- | --- |
+| Locate, Start, Pause, Resume and Stop (vacuum services and buttons) | Acknowledged; fresh reads and Home Assistant agreed within seconds. |
+| Return to base after the robot had seen its dock during the run | Pause, then `goToBase: true`, `sendToBase`, location recovery (action 9), docking (action 4) and docked within about a minute, four times (two of these runs started away from the dock and passed it first). |
+| Return to base before the robot had seen its dock (run started away from it) | Pause left `goToBase: false` with `dockHasBeenSeen: false`. The 0.1.6 override sent `sendToBase`; the robot replied `ok` and went idle where it stood, the run ended and the action reported success. |
+| Return to base while idle off the dock | Refused, matching the robot's `goToBase: false`. |
+| Spot cleaning | Started from the dock and docked by itself when finished. |
+| Robot sounds, bin and filter reminders, Gen3 schedule | Written, read back and restored. Local schedule times were stored as UTC with the correct weekday rollover. |
+| Advanced clean with extra-care navigation | Sent `navigationMode: 2`; the robot reported it in its state. |
+
+The event stream showed when the D5 reports changes. It sends a state event
+when its state changes and when it touches the dock, but not when command flags
+or the action change within a run. After a start, its only event carried
+`pause: false` and charging on; pause became available and charging ended about
+5 to 15 seconds later without an event. Home Assistant therefore kept the Pause
+button unavailable, and refused Pause and Return to base, until its next
+60-second poll. On the way home the robot sent one event for action 9 and none
+for the switch to docking, so Home Assistant showed Cleaning for the whole trip.
+
+0.1.9 follows the robot's `goToBase` flag again and leaves the run paused, with
+an error naming the missing base when the robot is off its dock and
+`dockHasBeenSeen` is false. Pause, Stop and Return to base refusals based on
+cached readiness are checked once against a fresh read, state is read again 10
+seconds after a motion command or an event reporting the robot busy, and action
+9 after a Home Assistant return is shown as Returning. Regression tests replay the observed sequences;
+they fail on 0.1.8. A mapping run was started and interrupted, so no saved map
+exists on this installation; saved-map and boundary writes, log uploads and
+factory reset remain fixture-tested. Gen4 behavior remains source-verified.
+
+The same release fixes findings from an independent review of 0.1.8: the
+Navigation mode select now shows Normal, which Start sends, until a default is
+chosen; a failed Gen4 language read no longer empties the language select; map
+names stay while the map list is unknown; a mapped Gen4 schedule event can be
+turned off, but not switched on, during floorplan recovery; and errors for
+unknown event IDs, whole-home cleaning with a map and off-step reminder values
+name the actual problem.
 
 ## Quality target
 

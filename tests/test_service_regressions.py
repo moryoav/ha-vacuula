@@ -180,8 +180,9 @@ async def test_explicit_house_is_mapless_and_rejects_conflicting_map(
     coordinator.async_refresh_maps.assert_not_awaited()
     coordinator.async_command.reset_mock()
     coordinator.command_payloads.clear()
-    with pytest.raises(ServiceValidationError):
+    with pytest.raises(ServiceValidationError) as error:
         await _call(hass, action_setup, "clean", cleaning_type="house", map_id="map1")
+    assert error.value.translation_key == "house_with_map"
     assert coordinator.command_payloads == []
 
 

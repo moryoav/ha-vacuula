@@ -107,7 +107,7 @@ There is no separate options flow; cleaning defaults are entity controls.
 
 | Robot generation | Status |
 | --- | --- |
-| `neato.gen3` | Implemented from the app protocol. D5 telemetry, Start, Pause, Resume and return to base during an active run were verified on real hardware. Map and schedule writes remain fixture-tested. |
+| `neato.gen3` | Implemented from the app protocol. D5 telemetry, Locate, Start, Pause, Resume, Stop, spot cleaning, return to base, preferences and schedule writes were verified on real hardware. Map writes remain fixture-tested. |
 | `neato.gen4` | Implemented and tested with fixtures derived from the app protocol. No Generation 4 hardware validation yet. |
 | Other generations | Not exposed by this integration. |
 
@@ -160,10 +160,15 @@ intended, select it again after upgrading. Resuming continues the existing run.
 Returning to base during cleaning pauses the run, waits 3.5 seconds and checks
 the robot's latest command readiness before sending it home. The sequence is
 serialized so another action cannot interrupt the pause-to-home transition.
-Some Generation 3 firmware keeps `goToBase` false after pausing. A fresh state
-confirming an error-free, resumable paused cleaning run permits the home command
-in that case, matching the app. Command acceptance does not prove docking;
-the vacuum activity and docked sensor continue to show the reported robot state.
+If the robot still reports that it cannot go home (`goToBase` false), the run
+stays paused and the action reports an error; the Vacuula app also disables its
+home button for a paused robot in that state. A D5 reports this when it has not
+seen its base during the run, for example after starting away from the dock or
+after a stop; sending it home anyway ends the run where it stands. Let it clean
+until it passes its base, or carry it back. After Home Assistant sends a D5
+home, the vacuum shows Returning for the trip. Command acceptance does not prove
+docking; the vacuum activity and docked sensor continue to show the reported
+robot state.
 
 The vacuum's activity distinguishes cleaning and exploration from maintenance.
 Log uploads, software updates, menus and stationary map transfers show docked
@@ -283,8 +288,10 @@ no-go zones you just edited. The marker clears when a floorplan is active again
 or when the robot is removed. Vacuula reports a failed upload and a deliberate
 demotion the same way, so a demotion made only in the Vacuula app does not
 clear it; demote with the action instead. Explicit whole-home cleaning remains
-available. Existing robot schedules and controls outside this integration are
-not blocked. Robot commands are never retried automatically.
+available, and a mapped schedule event can still be turned off, with its switch
+or `vacuula.update_schedule_event`. Existing robot schedules and controls
+outside this integration are not blocked. Robot commands are never retried
+automatically.
 
 A boundary contains `id`, `name`, `color`, `type` (`polygon` or `polyline`),
 `vertices`, and `enabled`. Values are accepted as the Vacuula app stores them,
@@ -363,7 +370,13 @@ only the follow-up read fails.
 
 Robot commands are serialized per robot and sent once. Map selection and native
 command-readiness checks happen inside the same lock as execution, so a queued
-action is checked again when it executes. A timeout does not prove
+action is checked again when it executes. The robot does not announce every
+readiness change: pause becomes available a few seconds after it leaves the
+dock without a new event. Pause, Stop and Return to base requests refused
+because of cached readiness are therefore checked once more against a fresh
+state read. The state is also read again 10 seconds after the robot starts
+driving, whoever started it, which updates the buttons and readiness sensors.
+A timeout does not prove
 that the robot ignored a command, so commands are never automatically retried.
 After a successful command, the integration reads state back from the robot.
 

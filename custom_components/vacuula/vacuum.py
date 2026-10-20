@@ -199,7 +199,9 @@ class VacuulaVacuum(VacuulaEntity, StateVacuumEntity):
                 if self.detail("isDocked", "is_docked") is True
                 else VacuumActivity.IDLE
             )
-        if action in (4, "docking"):
+        if action in (4, "docking") or (action == 9 and self.robot.returning):
+            # A D5 sent home first reports "recovering location" (9) and sends
+            # no event when it switches to docking (4) on the way.
             return VacuumActivity.RETURNING
         if action in (1, 2, 3, 11, "cleaning"):
             return VacuumActivity.CLEANING

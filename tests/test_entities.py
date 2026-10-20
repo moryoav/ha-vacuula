@@ -391,9 +391,11 @@ async def test_robot_settings_confirmed_by_readback(hass, loaded):
 
 async def test_push_offline_readiness_and_new_robot(hass, loaded):
     """Apply readiness and connectivity updates and discover a later robot once."""
-    entry, _client, _states = loaded
+    entry, _client, states = loaded
     coordinator = entry.runtime_data
     robot = coordinator.robots["robot3"]
+    # The refusal is confirmed with a fresh read, so the robot must agree.
+    states["robot3"]["availableCommands"]["stop"] = False
     robot.state["availableCommands"]["stop"] = False
     coordinator.async_set_updated_data(coordinator.robots)
     await hass.async_block_till_done()

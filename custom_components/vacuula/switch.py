@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, GEN3
 from .coordinator import VacuulaCoordinator
-from .data import RobotData
+from .data import RobotData, event_targets_map
 from .entity import (
     VacuulaEntity,
     async_add_robot_entities,
@@ -188,8 +188,14 @@ class VacuulaMapSwitch(VacuulaEntity, SwitchEntity):
         )
 
     def _update_name(self) -> None:
-        """Follow map renames, falling back to the map ID when no name is known."""
+        """Follow map renames, falling back to the map ID when no name is known.
+
+        While the map list is unknown (a failed read or an unlisted robot) the
+        last known name is kept.
+        """
         floor_map = self.floor_map
+        if floor_map is None and getattr(self, "_attr_translation_placeholders", None):
+            return
         set_name_placeholders(
             self,
             {
@@ -330,10 +336,15 @@ class VacuulaScheduleEventSwitch(VacuulaEntity, SwitchEntity):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="action_unavailable"
             )
+
+        def update(current: dict[str, Any]) -> dict[str, Any]:
+            """Set the flag; enabling a mapped event waits for map recovery."""
+            if enabled and event_targets_map(current):
+                self.coordinator.validate_map_recovery(self.serial)
+            return {**current, "enabled": enabled}
+
         await self.coordinator.async_update_schedule_event(
-            self.serial,
-            self.event_id,
-            lambda current: {**current, "enabled": enabled},
+            self.serial, self.event_id, update
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:

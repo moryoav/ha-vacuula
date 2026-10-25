@@ -79,17 +79,19 @@ setup flow, which searches for local servers automatically.
 You can also open **Settings > Devices & services** and configure the discovered
 **Vacuula** server, or choose **Add integration > Vacuula**.
 
-1. Confirm the discovered server. If several servers are found, choose one
-   first. Home Assistant reads the address and actual port from the server's
-   `_vacuula._tcp.local.` announcement. Already configured servers are excluded.
-2. If no new server can be reached, enter its HTTP or HTTPS origin, for example
+1. When new servers are found, choose **Use a discovered server** and confirm
+   it. If several servers are found, choose one first. Home Assistant reads the
+   address and actual port from the server's `_vacuula._tcp.local.`
+   announcement. Already configured servers are excluded.
+2. To use a hostname, an HTTPS reverse proxy, or another server instead, choose
+   **Enter an address** and enter its HTTP or HTTPS origin, for example
    `http://vacuula.local`, or `http://vacuula.local:81` if you changed Vacuula's
    app port from its default of 80. The hostname must resolve from Home
    Assistant; use the server's LAN address if it does not.
 
-The **Server URL** field also appears when discovered servers are already
-configured, or a discovered address cannot be reached. This allows adding a
-second server or correcting an address advertised by a VPN or Docker host.
+The **Server URL** field also appears directly when no new server is found, or
+a discovered address cannot be reached. This allows adding a second server or
+correcting an address advertised by a VPN or Docker host.
 Discovery needs local mDNS traffic to reach Home Assistant; isolated networks
 may require the manual address. Include the protocol, and the app port unless it
 is the default 80; omit `/web`, `/api`, ingress paths, credentials, query

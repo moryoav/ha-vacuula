@@ -113,6 +113,11 @@ async def test_conflicting_advertised_hostname_does_not_hide_a_second_server(
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": "user"}
         )
+    # Only the second, unconfigured server is offered.
+    assert result["description_placeholders"] == {"servers": "http://192.0.2.2:81"}
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "discovered_server"}
+    )
     assert result["step_id"] == "confirm"
     assert api.call_args.args[-1] == "http://192.0.2.2:81"
     resolver.assert_awaited_once_with("vacuula.local")

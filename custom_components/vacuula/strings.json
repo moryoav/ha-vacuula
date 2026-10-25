@@ -12,6 +12,14 @@
           "url": "The HTTP or HTTPS address. Add the app port if Vacuula does not use its default port 80. Use the app's direct address, without /web or an ingress path."
         }
       },
+      "discovered": {
+        "title": "Vacuula server found",
+        "description": "Found on your network: {servers}. Connect to a discovered server, or enter another address, such as a hostname or an HTTPS proxy.",
+        "menu_options": {
+          "discovered_server": "Use a discovered server",
+          "manual_address": "Enter an address"
+        }
+      },
       "select_server": {
         "title": "Choose a Vacuula server",
         "description": "Several local Vacuula servers were found. Choose the server to connect.",

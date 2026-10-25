@@ -54,6 +54,19 @@ def assert_confirmation(result):
     assert result.get("data_schema") is None or not result["data_schema"].schema
 
 
+async def start_discovered(hass):
+    """Start setup from Add integration and choose the discovered server."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "discovered"
+    assert result["menu_options"] == ["discovered_server", "manual_address"]
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "discovered_server"}
+    )
+
+
 async def finish_setup(hass, result):
     """Confirm a pending flow while bypassing integration loading."""
     with patch("custom_components.vacuula.async_setup_entry", return_value=True):
@@ -65,9 +78,7 @@ async def finish_setup(hass, result):
 async def test_single_server_uses_advertised_port(hass, search, api):
     """Preserve the advertised port and hostname alias when confirming one server."""
     search.return_value = [advertised_server()]
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    result = await start_discovered(hass)
     assert_confirmation(result)
     search.assert_awaited_once()
     assert api.call_args.args[-1] == "http://192.0.2.1:8099"
@@ -88,9 +99,7 @@ async def test_multiple_servers_offer_selection(hass, search, api):
         advertised_server(),
         advertised_server("192.0.2.2", 12345, "Other Vacuula"),
     ]
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    result = await start_discovered(hass)
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "select_server"
     api.assert_not_called()
@@ -122,9 +131,7 @@ async def test_duplicate_advertisements_offer_one_confirmation(hass, search, api
         advertised_server(port=80),
         advertised_server(port=80, name="Vacuula Alias"),
     ]
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    result = await start_discovered(hass)
     assert_confirmation(result)
     assert api.call_args.args[-1] == "http://192.0.2.1"
     api.return_value.async_server_info.assert_awaited_once()
@@ -167,9 +174,7 @@ async def test_unreachable_advertisement_allows_a_working_address(
     if multiple:
         search.return_value.append(advertised_server("192.0.2.2"))
     api.return_value.async_server_info.side_effect = CannotConnect("unreachable")
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    result = await start_discovered(hass)
     if multiple:
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {"url": "http://192.0.2.1:8099"}
@@ -205,9 +210,7 @@ async def test_unreachable_advertisement_fallback_preserves_duplicate_prevention
     ).add_to_hass(hass)
     search.return_value = [advertised_server()]
     api.return_value.async_server_info.side_effect = CannotConnect("unreachable")
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    result = await start_discovered(hass)
     assert result["step_id"] == "user"
     api.return_value.async_server_info.side_effect = None
 
@@ -232,9 +235,8 @@ async def test_discovered_robot_identity_duplicate_offers_another_address(
     # The configured address no longer answers, so discovery replaces it.
     offline(api, "http://192.0.2.3:81")
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    # The server's robots show it is already configured only once it is read.
+    result = await start_discovered(hass)
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "user"
     assert entry.data["url"] == "http://192.0.2.1:8099"
@@ -257,9 +259,7 @@ async def test_configured_servers_are_excluded_from_selection(hass, search, api)
         data={"url": "http://192.0.2.1:8099", "robot_ids": ["EXISTING-robot"]},
     ).add_to_hass(hass)
     search.return_value = [advertised_server(), advertised_server("192.0.2.2")]
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    result = await start_discovered(hass)
     assert_confirmation(result)
     assert api.call_args.args[-1] == "http://192.0.2.2:8099"
 
@@ -281,9 +281,7 @@ async def test_confirmation_connection_failure_allows_address_retry(
 ):
     """Preserve discovery aliases only when retrying the original endpoint."""
     search.return_value = [advertised_server()]
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    result = await start_discovered(hass)
     assert_confirmation(result)
     api.return_value.async_server_info.side_effect = CannotConnect("server offline")
 
@@ -313,9 +311,7 @@ async def test_confirmation_rechecks_entries_created_during_setup(
 ):
     """Reject a duplicate endpoint or robot configured before confirmation finishes."""
     search.return_value = [advertised_server()]
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    result = await start_discovered(hass)
     assert_confirmation(result)
     MockConfigEntry(
         domain=DOMAIN,
@@ -340,9 +336,7 @@ async def test_manual_setup_can_complete_with_existing_discovery_flow(
     assert_confirmation(discovered)
     search.return_value = [service]
 
-    manual = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
+    manual = await start_discovered(hass)
     assert_confirmation(manual)
     manual = await finish_setup(hass, manual)
     assert manual["type"] == FlowResultType.CREATE_ENTRY
@@ -356,3 +350,40 @@ async def test_manual_setup_can_complete_with_existing_discovery_flow(
     assert discovered["type"] == FlowResultType.ABORT
     assert discovered["reason"] == "already_configured"
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+@pytest.mark.parametrize("servers", [1, 2])
+async def test_discovered_servers_still_allow_a_manual_address(
+    hass, search, api, servers
+):
+    """Offer address entry, such as an HTTPS proxy, beside discovered servers."""
+    search.return_value = [advertised_server()]
+    if servers == 2:
+        search.return_value.append(advertised_server("192.0.2.2"))
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    assert result["type"] == FlowResultType.MENU
+    expected = ["http://192.0.2.1:8099", "http://192.0.2.2:8099"][:servers]
+    assert result["description_placeholders"] == {"servers": ", ".join(expected)}
+    api.assert_not_called()
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "manual_address"}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert next(iter(result["data_schema"].schema)).default() == "http://vacuula.local"
+    api.assert_not_called()
+
+    with patch("custom_components.vacuula.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"url": "https://vacuula.example.org"}
+        )
+        await hass.async_block_till_done()
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"] == {
+        "url": "https://vacuula.example.org",
+        "robot_ids": ["NEW-robot"],
+    }
+    search.assert_awaited_once()

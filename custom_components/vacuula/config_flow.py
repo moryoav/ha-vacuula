@@ -251,12 +251,8 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._remember_aliases(entry, aliases)
                     continue
                 self._discovered_servers[base_url] = server
-            if len(self._discovered_servers) == 1:
-                return await self.async_step_zeroconf(
-                    next(iter(self._discovered_servers.values()))
-                )
             if self._discovered_servers:
-                return await self.async_step_select_server()
+                return await self.async_step_discovered()
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
@@ -269,6 +265,38 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 return await self._async_finish(base_url, robot_ids)
         return self._show_address_form(errors)
+
+    async def async_step_discovered(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Offer the discovered servers or an address entered by the user.
+
+        A user may prefer a hostname, a reverse proxy or another server to the
+        advertised address of a discovered one.
+        """
+        return self.async_show_menu(
+            step_id="discovered",
+            menu_options=["discovered_server", "manual_address"],
+            description_placeholders={
+                "servers": ", ".join(sorted(self._discovered_servers))
+            },
+        )
+
+    async def async_step_discovered_server(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Continue with the discovered server, asking which one when several."""
+        if len(self._discovered_servers) == 1:
+            return await self.async_step_zeroconf(
+                next(iter(self._discovered_servers.values()))
+            )
+        return await self.async_step_select_server()
+
+    async def async_step_manual_address(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Enter a server address even though servers were discovered."""
+        return self._show_address_form()
 
     def _show_address_form(
         self, errors: dict[str, str] | None = None

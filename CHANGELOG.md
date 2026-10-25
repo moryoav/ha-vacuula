@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.13
+
+- Kept a working server address when zeroconf rediscovers the server. The advertised hostname, an HTTPS reverse proxy and an address set with Reconfigure are no longer replaced with the plain-HTTP IP address. A missing, malformed or unreachable address is still updated, and HTTPS is never replaced with plain HTTP.
+- Recognized every Neato dustbin code. Dustbin missing and Dustbin full now also follow `ui_error_dust_bin_missing`, `ui_alert_dust_bin_full` and the full-bin errors reported when the robot stops.
+- Treated Vacuula's 504 robot timeout on Return to base as uncertain delivery instead of a rejection. A Generation 3 robot that drives home after the timeout shows Returning, and a repeated Home press no longer pauses it and sends Home again.
+- Reused map images until the map changes, for at most an hour, instead of downloading and rendering the floor grid on every five-minute image token rotation. The image's last-updated time now changes only when the picture does.
+- Added a setup menu when servers are discovered: use a discovered server, or enter an address such as a hostname or an HTTPS proxy.
+- Moved action names, descriptions and field labels into translations, and gave every action dropdown readable option labels.
+- Removed an unreachable Return to base button command and merged two identical reply-unwrapping helpers.
+
 ## 0.1.12
 
 - Preserved newer server events when an older HTTP robot-list reply finishes, preventing stale connection flags, names and removal decisions from clearing map recovery.

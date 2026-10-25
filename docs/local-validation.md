@@ -1,16 +1,16 @@
-# Local validation, 20 October 2026
+# Local validation, 25 October 2026
 
-Integration version: **0.1.12**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. During the latest review, the live HACS installation was **0.1.11**. Review tests used protocol fixtures and controlled failure sequences; Generation 4 remains source-verified without Gen4 hardware.
+Integration version: **0.1.13**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. The 0.1.13 changes were checked with tests, protocol fixtures and controlled failure sequences only; no live robot check was made for this release. Generation 4 remains source-verified without Gen4 hardware.
 
 ## Automated checks
 
-- **1,070 tests passed**, including 135 additional cases since the released 0.1.11 suite. These cover server-list races, fresh advanced-cleaning targets, explicit-map and unknown-docking guards, duplicate boundary IDs, rejected-control intent, optional language choices, changing diagnostic text and overall Gen4 cleaning completion, alongside the earlier protocol and recovery regressions.
-- **99.54% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.32%** and the discovery helper has **100%**.
+- **1,099 tests passed**, including 29 additional cases since the released 0.1.12 suite. These cover rediscovery of working, HTTPS, malformed and unreachable addresses, every Neato dustbin code, Vacuula's 504 robot timeout on Return to base, map image reuse, the setup menu for discovered servers and translated action texts, alongside the earlier protocol and recovery regressions.
+- **99.54% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.38%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 21 integration and tool modules.
-- **100% docstring coverage: 1,056/1,056 items in 78 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
+- **100% docstring coverage: 1,090/1,090 items in 80 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
-- Actionlint: **passed**, GitHub workflow syntax and expressions validated.
+- Actionlint: **passed** for 0.1.12, GitHub workflow syntax and expressions validated. The workflow file is unchanged in 0.1.13.
 
 Run from the source folder on this development machine:
 
@@ -418,6 +418,46 @@ confirmed Vacuula app 1.0.0 and the installed 0.1.11 integration healthy, with t
 D5 idle and docked at 99% and no reported error. The app was not modified. No
 cleaning, schedule, preference, map or destructive robot action was needed to
 reproduce these failures. Gen4 behavior remains source-verified and simulated.
+
+## Full review of 0.1.12
+
+Reviewed released commit `957e42bd24affa8d689d6786a708ade036ae04a9` across the
+client, coordinator, actions, setup, discovery, entities, images and
+diagnostics. All 1,070 existing tests passed with 99% branch coverage, so the
+review looked for behavior that was tested as intended but wrong in practice.
+Probe tests and Home Assistant source checks established these defects:
+
+- Zeroconf rediscovery replaced any configured URL with the announced
+  plain-HTTP IP address and reloaded the entry. A probe confirmed that the
+  server's own advertised hostname and a deliberately configured HTTPS reverse
+  proxy were both rewritten, which also undid Reconfigure. The URL now follows
+  discovery only when the stored address is missing, malformed, unreachable
+  within 10 seconds, or reaches other robots; HTTPS is never downgraded.
+- The dustbin sensors matched only `dustbin_missing` (error) and `dustbin_full`
+  (alert). Home Assistant's former Neato integration lists the robot codes
+  `ui_error_dust_bin_missing`, `ui_error_dust_bin_full`,
+  `ui_alert_dust_bin_full` and `dustbin_full` as an error too. Both sensors now
+  accept every listed code. Which codes the D5 reports was not rechecked.
+- Vacuula's 504 after its robot wait was a plain `CommandError`, which Return to
+  base treated as an explicit rejection, clearing pending Gen3 home intent. It
+  is now `CommandTimedOut`, handled like a lost acknowledgement.
+- Home Assistant rotates image tokens every five minutes, and the five-minute
+  map cache meant each viewer refetch downloaded and rendered the floor grid
+  again and changed the image state. Images are now reused until the map's list
+  record changes, for at most an hour, and the timestamp changes only with the
+  picture.
+- Setup from Add integration offered no address entry once a new server was
+  discovered. A menu now offers the discovered server or an address.
+- Action names and descriptions were fixed English in `services.yaml`; they now
+  live in the translation files with labelled dropdown options.
+- An unreachable Return to base entry in the button command table and two
+  identical reply-unwrapping helpers were removed.
+
+Ruff, strict mypy, the repository-wide docstring check and official Hassfest,
+run from the existing Home Assistant Core checkout, passed. The complete suite
+passed in 171.36 seconds. No command was sent to the physical robot and the
+Vacuula app was not modified. Gen4 behavior remains source-verified and
+simulated.
 
 ## Quality target
 

@@ -334,6 +334,47 @@ def test_problem_binary_values(generation, state, expected):
     assert binary_value(RobotData("x", "x", generation, state=state), desc) is expected
 
 
+@pytest.mark.parametrize(
+    ("state", "missing", "full"),
+    [
+        ({"error": None, "alert": None}, False, False),
+        ({"error": "dustbin_missing", "alert": None}, True, False),
+        ({"error": "ui_error_dust_bin_missing", "alert": None}, True, False),
+        ({"error": None, "alert": "dustbin_full"}, False, True),
+        ({"error": None, "alert": "ui_alert_dust_bin_full"}, False, True),
+        ({"error": "dustbin_full", "alert": None}, False, True),
+        ({"error": "ui_error_dust_bin_full", "alert": None}, False, True),
+        ({"error": "ui_error_dust_bin_emptied", "alert": None}, False, False),
+        (
+            {"error": "ui_error_brush_stuck", "alert": "maint_brush_change"},
+            False,
+            False,
+        ),
+        # A full-bin error is still reported while the alert field is malformed.
+        ({"error": "dustbin_full", "alert": {}}, False, None),
+    ],
+)
+def test_dustbin_binary_values_cover_all_firmware_codes(state, missing, full):
+    """Recognize every Neato firmware code for a missing or full dustbin."""
+    robot = RobotData("x", "x", GEN3, state=state)
+    values = {
+        desc.key: binary_value(robot, desc)
+        for desc in BINARY_DESCRIPTIONS
+        if desc.key in {"dustbin_missing", "dustbin_full"}
+    }
+    assert values == {"dustbin_missing": missing, "dustbin_full": full}
+
+
+def test_dustbin_binary_values_are_gen3_only():
+    """Leave dustbin flags unknown for Gen4, which reports bins differently."""
+    robot = RobotData("x", "x", GEN4, state={"error": "dustbin_full", "alert": None})
+    assert all(
+        binary_value(robot, desc) is None
+        for desc in BINARY_DESCRIPTIONS
+        if desc.key in {"dustbin_missing", "dustbin_full"}
+    )
+
+
 def test_binary_unknowns_and_connection(coordinator):
     """Keep connectivity observable offline and honor coordinator availability."""
     robot = coordinator.robots["robot"]

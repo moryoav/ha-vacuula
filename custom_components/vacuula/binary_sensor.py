@@ -25,6 +25,13 @@ from .telemetry import key_and_label, scalars, source_data
 
 PARALLEL_UPDATES = 0
 
+# Neato firmware reports the same dustbin conditions under several codes. The
+# robot also stops with a full-bin error, not only a full-bin alert.
+DUSTBIN_MISSING_ERRORS = frozenset({"dustbin_missing", "ui_error_dust_bin_missing"})
+DUSTBIN_FULL_ERRORS = frozenset({"dustbin_full", "ui_error_dust_bin_full"})
+DUSTBIN_FULL_ALERTS = frozenset({"dustbin_full", "ui_alert_dust_bin_full"})
+_UNKNOWN = object()
+
 
 @dataclass(frozen=True, kw_only=True)
 class VacuulaBinaryDescription(BinarySensorEntityDescription):
@@ -118,6 +125,14 @@ DESCRIPTIONS = (
 )
 
 
+def _gen3_message(robot: RobotData, field: str) -> object:
+    """Return a Gen3 error or alert code, None when clear, or _UNKNOWN."""
+    if field not in robot.state:
+        return _UNKNOWN
+    value = robot.state[field]
+    return value if value is None or isinstance(value, str) else _UNKNOWN
+
+
 def binary_value(
     robot: RobotData, description: VacuulaBinaryDescription
 ) -> bool | None:
@@ -143,28 +158,17 @@ def binary_value(
         codes = gen4_error_codes(robot)
         return None if codes is None else bool(codes)
     if key == "dustbin_missing":
-        if "error" not in robot.state:
+        error = _gen3_message(robot, "error")
+        if robot.generation != GEN3 or error is _UNKNOWN:
             return None
-        if robot.state["error"] is not None and not isinstance(
-            robot.state["error"], str
-        ):
-            return None
-        return (
-            robot.state.get("error") == "dustbin_missing"
-            if robot.generation == GEN3
-            else None
-        )
+        return error in DUSTBIN_MISSING_ERRORS
     if key == "dustbin_full":
-        if "alert" not in robot.state:
-            return None
-        if robot.state["alert"] is not None and not isinstance(
-            robot.state["alert"], str
-        ):
+        alert = _gen3_message(robot, "alert")
+        if robot.generation != GEN3 or alert is _UNKNOWN:
             return None
         return (
-            robot.state.get("alert") == "dustbin_full"
-            if robot.generation == GEN3
-            else None
+            alert in DUSTBIN_FULL_ALERTS
+            or _gen3_message(robot, "error") in DUSTBIN_FULL_ERRORS
         )
     path = description.gen3_path if robot.generation == GEN3 else description.gen4_path
     value = value_at(robot.state, *path) if path else None

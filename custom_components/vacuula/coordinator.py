@@ -22,6 +22,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .client import (
     CannotConnect,
     CommandError,
+    CommandTimedOut,
     MapRequestNotSent,
     MapRequestRejected,
     UnsupportedCommand,
@@ -1370,7 +1371,12 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 # A lost acknowledgement must not relabel already observed
                 # home motion as cleaning. An explicit rejection can discard
                 # pending intent, while uncertain delivery remains bounded.
-                if isinstance(err, CommandError) and robot.return_phase == "pending":
+                # A robot timeout is uncertain: the robot may still drive home.
+                if (
+                    isinstance(err, CommandError)
+                    and not isinstance(err, CommandTimedOut)
+                    and robot.return_phase == "pending"
+                ):
                     clear_return_trip(robot)
                     if (
                         previous_return[0] == "paused"

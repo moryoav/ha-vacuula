@@ -12,7 +12,11 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from test_integration import loaded as integration_loaded
 
 from custom_components.vacuula import data as robot_data
-from custom_components.vacuula.client import CannotConnect, CommandError
+from custom_components.vacuula.client import (
+    CannotConnect,
+    CommandError,
+    CommandTimedOut,
+)
 from custom_components.vacuula.const import GEN3, GEN4
 from custom_components.vacuula.data import (
     RETURN_PENDING_SECONDS,
@@ -217,6 +221,38 @@ async def test_uncertain_ack_keeps_bounded_intent_for_delayed_motion(hass, loade
     coordinator._handle_event(SERIAL, gen3_event(state=2, action=9))
     assert robot.returning
     assert sent_names(server, names).count(names["home"]) == 1
+
+
+@pytest.mark.parametrize("loaded", [GEN3], indirect=True)
+async def test_robot_timeout_keeps_bounded_intent_for_delayed_motion(hass, loaded):
+    """Treat Vacuula's 504 robot timeout as uncertain delivery, not a rejection."""
+    entry, server, generation = loaded
+    coordinator = entry.runtime_data
+    names, live = paused_robot(entry, server, generation)
+    original = server.client.async_command.side_effect
+
+    async def command(serial, payload):
+        """Time out Home after Vacuula may already have sent it to the robot."""
+        if payload.get("cmd") == "sendToBase":
+            raise CommandTimedOut("Robot did not answer in time", status=504)
+        return await original(serial, payload)
+
+    server.client.async_command.side_effect = command
+    server.client.async_command.reset_mock()
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_return_to_base(SERIAL)
+    robot = coordinator.robots[SERIAL]
+    assert robot.return_phase == "pending"
+    # The robot did receive Home and drives off while recovering its location.
+    live.update(state=2, action=9)
+    coordinator._handle_event(SERIAL, gen3_event(state=2, action=9))
+    assert robot.returning
+    assert VacuulaVacuum(coordinator, SERIAL).activity == "returning"
+    # A second Home press must not pause the trip or send Home again.
+    await coordinator.async_return_to_base(SERIAL)
+    sent = sent_names(server, names)
+    assert sent.count(names["home"]) == 1
+    assert names["pause"] not in sent
 
 
 @pytest.mark.parametrize("loaded", [GEN3], indirect=True)

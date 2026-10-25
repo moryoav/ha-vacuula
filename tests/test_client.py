@@ -13,6 +13,7 @@ from custom_components.vacuula.client import (
     REQUEST_TIMEOUT,
     CannotConnect,
     CommandError,
+    CommandTimedOut,
     InvalidAuth,
     UnsupportedCommand,
     VacuulaClient,
@@ -178,7 +179,8 @@ async def test_command_returns_full_envelope(payload, command):
         ({"result": "not_implemented"}, 400, UnsupportedCommand),
         ({"code": 409, "body": {"error": "PRIVATE_RESPONSE"}}, 200, CommandError),
         ({"code": 501}, 200, UnsupportedCommand),
-        ({"error": "PRIVATE_RESPONSE"}, 504, CommandError),
+        ({"error": "PRIVATE_RESPONSE"}, 504, CommandTimedOut),
+        ({"error": "PRIVATE_RESPONSE"}, 502, CommandError),
     ],
 )
 async def test_command_rejection(payload, status, error):
@@ -188,6 +190,16 @@ async def test_command_rejection(payload, status, error):
         await client.async_command("robot", {"cmd": "findMe"})
     assert "PRIVATE_RESPONSE" not in str(caught.value)
     session.request.assert_called_once()
+
+
+@pytest.mark.parametrize(("status", "timed_out"), [(504, True), (502, False)])
+async def test_only_a_robot_timeout_is_uncertain(status, timed_out):
+    """Mark Vacuula's robot-wait timeout as uncertain, unlike other rejections."""
+    client, _, _ = make_client({"error": "late"}, status=status)
+    with pytest.raises(CommandError) as caught:
+        await client.async_command("robot", {"cmd": "sendToBase"})
+    assert isinstance(caught.value, CommandTimedOut) is timed_out
+    assert caught.value.status == status
 
 
 @pytest.mark.parametrize(

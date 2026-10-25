@@ -46,6 +46,13 @@ class CommandError(VacuulaError):
     """The server or robot rejected a command."""
 
 
+class CommandTimedOut(CommandError):
+    """Vacuula sent the command, but the robot did not answer within its wait.
+
+    The robot may still have run the command, so this is not a rejection.
+    """
+
+
 class MapRequestRejected(CommandError):
     """A recognized Vacuula map-error reply proves its HTTP handler completed."""
 
@@ -275,6 +282,9 @@ class VacuulaClient:
             raise UnsupportedCommand("Command is not supported", status=status)
         if status >= 500 and not command:
             raise CannotConnect("Server is unavailable", status=status)
+        if status == 504:
+            # Vacuula answers 504 after its robot wait; delivery is unknown.
+            raise CommandTimedOut("Robot did not answer in time", status=status)
         if not 200 <= status < 300:
             raise CommandError("Request was rejected", status=status)
 

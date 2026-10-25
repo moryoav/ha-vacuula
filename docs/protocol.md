@@ -296,7 +296,9 @@ explicit positive permission, pausing first if the fresh state permits it.
 Gen3 intent waits at most 60 seconds for observed departure, then tracks a trip
 for at most 15 minutes without renewing its deadline on duplicate reports or
 pause/resume. Repeated Home requests do not pause or resend an accepted pending
-or moving trip. Lost acknowledgements preserve observed motion; terminal states,
+or moving trip. Lost acknowledgements, including Vacuula's 504 when the robot
+does not answer within its wait, preserve pending intent and observed motion;
+only an explicit rejection clears pending intent. Terminal states,
 accepted new cleaning commands, terminal Stop telemetry, and expiry remove old
 context. Rejected or interrupted requests do not erase an otherwise confirmed
 trip. An overlapping HTTP robot-list poll also cannot replace a newer server

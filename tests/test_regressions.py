@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import (
 from test_client import make_client as protocol_client
 from test_config_flow import discovery
 from test_coordinator import make_client as coordinator_client
+from test_discovery_address import offline
 
 from custom_components.vacuula import async_remove_config_entry_device
 from custom_components.vacuula.client import (
@@ -371,6 +372,8 @@ async def test_rediscovery_updates_same_robots_without_duplicate(hass, state):
         client_cls.return_value.async_robots = AsyncMock(
             return_value={"TEST-robot": {}}
         )
+        # The old address no longer answers, so discovery replaces it.
+        offline(client_cls, "http://old.local:81")
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": "zeroconf"}, data=discovery()
         )

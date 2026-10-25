@@ -441,7 +441,10 @@ After a successful command, the integration reads state back from the robot.
 - **Map image missing:** a valid stored floor grid must be present on the server.
   Run maps, live robot paths, and boundary editing are not image features.
 - **Server address changed:** use **Reconfigure** with the new origin. Zeroconf
-  rediscovery can also update the URL when a known robot identifies the server.
+  rediscovery also updates the URL when a known robot identifies the server and
+  the configured address no longer reaches it. A working address, such as the
+  advertised hostname or a reverse proxy, is kept, and HTTPS is never replaced
+  with plain HTTP.
 - **Floorplan upload not confirmed:** check **Settings > System > Repairs** for
   the robot and map ID. Promote the floorplan again in Vacuula or with
   `vacuula.map_action`, or demote it with the action to continue without it.

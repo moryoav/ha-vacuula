@@ -6,6 +6,7 @@ import pytest
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from test_discovery_address import offline
 
 from custom_components.vacuula.client import CannotConnect
 from custom_components.vacuula.const import DOMAIN
@@ -228,6 +229,8 @@ async def test_discovered_robot_identity_duplicate_offers_another_address(
     )
     entry.add_to_hass(hass)
     search.return_value = [advertised_server()]
+    # The configured address no longer answers, so discovery replaces it.
+    offline(api, "http://192.0.2.3:81")
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}

@@ -21,6 +21,8 @@ from .discovery import async_discover_servers
 
 CONF_URL_ALIASES = "url_aliases"
 IDENTITY_RESOLVE_TIMEOUT = 2.0
+# Bound the check that a configured address still reaches its server.
+CURRENT_URL_CHECK_TIMEOUT = 10.0
 
 
 def normalize_url(value: str) -> str:
@@ -187,6 +189,34 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return entry
         return None
 
+    async def _async_follow_discovered_url(
+        self, entry: config_entries.ConfigEntry, robot_ids: list[str]
+    ) -> bool:
+        """Return whether discovery should replace the entry's configured address.
+
+        Keep an address the server still answers on, such as its advertised
+        hostname or a reverse proxy, and never downgrade HTTPS to plain HTTP.
+        """
+        current = entry.data.get(CONF_URL)
+        try:
+            current = normalize_url(current) if isinstance(current, str) else None
+        except ValueError, TypeError:
+            current = None
+        if current is None or self._discovered_url is None:
+            return True
+        if current in self._discovered_aliases:
+            return False
+        if URL(current).scheme == "https" and (
+            URL(self._discovered_url).scheme != "https"
+        ):
+            return False
+        try:
+            async with asyncio.timeout(CURRENT_URL_CHECK_TIMEOUT):
+                _, current_robots = await self._validate(current)
+        except ValueError, TypeError, VacuulaError, TimeoutError:
+            return True
+        return not set(current_robots) & set(robot_ids)
+
     def _remember_aliases(
         self,
         entry: config_entries.ConfigEntry,
@@ -298,7 +328,8 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Validate an advertisement and reconcile existing server identities.
 
-        Update a known robot server's changed address and reload it when active.
+        Update a known robot server's address only when the configured one no
+        longer reaches it, and reload the entry when active.
         For manual setup, keep the address form available after discovery fails
         or finds an already configured server.
         """
@@ -314,8 +345,10 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if entry := await self._async_duplicate(
             self._discovered_url, robot_ids, self._discovered_aliases
         ):
-            address_changed = entry.data.get(CONF_URL) != self._discovered_url and bool(
-                set(entry.data.get("robot_ids", [])) & set(robot_ids)
+            address_changed = (
+                entry.data.get(CONF_URL) != self._discovered_url
+                and bool(set(entry.data.get("robot_ids", [])) & set(robot_ids))
+                and await self._async_follow_discovered_url(entry, robot_ids)
             )
             self._remember_aliases(entry, self._discovered_aliases, robot_ids)
             if address_changed:

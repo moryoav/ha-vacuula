@@ -15,6 +15,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from test_discovery_address import offline
 from test_integration import entity_id, loaded  # noqa: F401
 from test_server_identity import advertisement
 from test_services import call, setup  # noqa: F401
@@ -410,19 +411,20 @@ async def test_address_update_keeps_a_unique_id_held_by_an_ignored_discovery(
     ).add_to_hass(hass)
     entry = MockConfigEntry(
         domain=DOMAIN,
-        unique_id="http://vacuula.local:81",
-        data={"url": "http://vacuula.local:81", "robot_ids": ["R1"]},
+        unique_id="http://old.local:81",
+        data={"url": "http://old.local:81", "robot_ids": ["R1"]},
     )
     entry.add_to_hass(hass)
     with patch("custom_components.vacuula.config_flow.VacuulaClient") as client:
         client.return_value.async_server_info = AsyncMock(return_value={})
         client.return_value.async_robots = AsyncMock(return_value={"R1": {}})
+        offline(client, "http://old.local:81")
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": "zeroconf"}, data=advertisement()
         )
     assert result["reason"] == "already_configured"
     assert entry.data["url"] == "http://192.0.2.1:81"
-    assert entry.unique_id == "http://vacuula.local:81"
+    assert entry.unique_id == "http://old.local:81"
     assert "already in use" not in caplog.text
 
 

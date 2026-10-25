@@ -28,13 +28,13 @@ from .client import (
     UnsupportedCommand,
     VacuulaClient,
     VacuulaError,
+    unwrap,
 )
 from .const import DOMAIN, GEN3, GEN4
 from .data import (
     RobotData,
     begin_return_trip,
     clear_return_trip,
-    response_data,
     track_return_trip,
 )
 
@@ -384,7 +384,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
             return None
         payload = {"cmd" if robot.generation == GEN3 else "ability": command}
         try:
-            return response_data(await self.client.async_command(robot.serial, payload))
+            return unwrap(await self.client.async_command(robot.serial, payload))
         except VacuulaError as err:
             if isinstance(err, UnsupportedCommand):
                 self._unsupported.add((robot.serial, command))
@@ -400,9 +400,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 if robot.generation == GEN3
                 else {"ability": "state.show"}
             )
-            snapshot = response_data(
-                await self.client.async_command(robot.serial, command)
-            )
+            snapshot = unwrap(await self.client.async_command(robot.serial, command))
             for key, value in updates.items():
                 if isinstance(value, dict) and isinstance(snapshot.get(key), dict):
                     snapshot[key].update(value)
@@ -1104,7 +1102,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 elif self.has_pending_map_recovery(serial):
                     with suppress(VacuulaError):
                         await self._async_read_maps_locked(serial)
-                schedule = response_data(
+                schedule = unwrap(
                     await self.client.async_command(
                         serial, {"ability": "scheduling.show"}
                     )
@@ -1172,7 +1170,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                 if command.get("cmd") == "setPreferences":
                     # Read and merge under the same lock as the write so two
                     # settings actions cannot revert each other's changes.
-                    preferences = response_data(
+                    preferences = unwrap(
                         await self.client.async_command(
                             serial, {"cmd": "getPreferences"}
                         )
@@ -1192,7 +1190,7 @@ class VacuulaCoordinator(DataUpdateCoordinator[dict[str, RobotData]]):
                         "settings.set_robot_language": "settings.robot_language",
                         "settings.set_cleaning_options": "settings.cleaning_options",
                     }[ability]
-                    settings = response_data(
+                    settings = unwrap(
                         await self.client.async_command(
                             serial, {"ability": read_ability}
                         )

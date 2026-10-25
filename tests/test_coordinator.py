@@ -9,10 +9,10 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.vacuula.client import CannotConnect, UnsupportedCommand
+from custom_components.vacuula.client import CannotConnect, UnsupportedCommand, unwrap
 from custom_components.vacuula.const import DOMAIN, GEN3, GEN4
 from custom_components.vacuula.coordinator import VacuulaCoordinator
-from custom_components.vacuula.data import RobotData, response_data
+from custom_components.vacuula.data import RobotData
 
 
 def make_client():
@@ -44,10 +44,13 @@ def coordinator(hass):
 
 def test_unwrap():
     """Extract response dictionaries from both protocol envelope formats."""
-    assert response_data({"result": "ok", "data": {}, "state": 4}) == {"state": 4}
-    assert response_data({"body": {"state": "idle"}, "code": 200}) == {"state": "idle"}
-    assert response_data({"data": {"a": 1}}) == {"a": 1}
-    assert response_data({"data": []}) == {}
+    assert unwrap({"result": "ok", "data": {}, "state": 4}) == {"state": 4}
+    assert unwrap({"body": {"state": "idle"}, "code": 200}) == {"state": "idle"}
+    assert unwrap({"data": {"a": 1}}) == {"a": 1}
+    assert unwrap({"data": []}) == {}
+    # Callers store and merge the result, so it must not alias the response.
+    body = {"state": "idle"}
+    assert unwrap({"body": body, "code": 200}) is not body
 
 
 async def test_refresh(coordinator):

@@ -21,10 +21,10 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.util import dt as dt_util
 
-from .client import VacuulaError
+from .client import VacuulaError, unwrap
 from .const import DOMAIN, GEN3, GEN4
 from .coordinator import VacuulaCoordinator
-from .data import RobotData, event_targets_map, response_data
+from .data import RobotData, event_targets_map
 from .entity import value_at
 from .vacuum import cleaning_target
 
@@ -625,7 +625,7 @@ async def _get_data(
         if resource == "map":
             return await coordinator.client.async_map(serial, data["map_id"])
         if robot.generation == GEN3:
-            return response_data(
+            return unwrap(
                 await coordinator.async_command(
                     serial,
                     {"cmd": "getMapBoundaries", "params": {"mapId": data["map_id"]}},
@@ -656,7 +656,7 @@ async def _get_data(
     }
     if resource not in commands[robot.generation]:
         raise _error("unsupported_action")
-    return response_data(
+    return unwrap(
         await coordinator.async_command(
             serial,
             {

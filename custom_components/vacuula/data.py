@@ -104,17 +104,3 @@ def return_to_base_ready(robot: RobotData) -> bool | None:
     if home is False and pause is False:
         return False
     return None
-
-
-def response_data(response: dict[str, Any]) -> dict[str, Any]:
-    """Unwrap data replies while preserving Gen3 state fields at the root."""
-    if isinstance(body := response.get("body"), dict):
-        return body
-    data = response.get("data")
-    result = dict(data) if isinstance(data, dict) else {}
-    result.update(
-        (key, value)
-        for key, value in response.items()
-        if key not in {"version", "reqId", "result", "data"}
-    )
-    return result

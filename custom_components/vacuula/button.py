@@ -17,16 +17,12 @@ from .vacuum import VacuulaVacuum
 
 PARALLEL_UPDATES = 0
 
+# Return to base is not a plain command: it uses the coordinator's
+# pause-then-home sequence, like the vacuum entity.
 COMMANDS = {
     "stop": ("stopCleaning", "cleaning.cancel", "stop", "cancel"),
     "pause": ("pauseCleaning", "cleaning.pause", "pause", "pause"),
     "resume": ("resumeCleaning", "cleaning.resume", "resume", "resume"),
-    "return_to_base": (
-        "sendToBase",
-        "navigation.return_to_base",
-        "goToBase",
-        "return_to_base",
-    ),
     "locate": ("findMe", "utilities.find_me", None, None),
 }
 

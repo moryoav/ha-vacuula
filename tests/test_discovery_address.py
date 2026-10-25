@@ -104,6 +104,19 @@ async def test_unreachable_address_follows_discovery(hass, api, reload):
     reload.assert_awaited_once_with(entry.entry_id)
 
 
+@pytest.mark.parametrize("stored", ["vacuula", None])
+async def test_malformed_stored_address_follows_discovery(hass, api, reload, stored):
+    """Repair a missing or malformed stored address from the announcement."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="broken", data={"url": stored, "robot_ids": ["R1"]}
+    )
+    entry.add_to_hass(hass)
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+    await rediscover(hass)
+    assert entry.data["url"] == DISCOVERED
+    reload.assert_awaited_once_with(entry.entry_id)
+
+
 async def test_address_now_serving_other_robots_follows_discovery(hass, api, reload):
     """Replace an address that now reaches a different server."""
     other = MagicMock()

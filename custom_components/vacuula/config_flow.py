@@ -190,7 +190,10 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return None
 
     async def _async_follow_discovered_url(
-        self, entry: config_entries.ConfigEntry, robot_ids: list[str]
+        self,
+        entry: config_entries.ConfigEntry,
+        discovered_url: str,
+        robot_ids: list[str],
     ) -> bool:
         """Return whether discovery should replace the entry's configured address.
 
@@ -198,17 +201,16 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         hostname or a reverse proxy, and never downgrade HTTPS to plain HTTP.
         """
         current = entry.data.get(CONF_URL)
+        if not isinstance(current, str):
+            return True
         try:
-            current = normalize_url(current) if isinstance(current, str) else None
+            current = normalize_url(current)
         except ValueError, TypeError:
-            current = None
-        if current is None or self._discovered_url is None:
+            # A malformed stored address cannot reach the server.
             return True
         if current in self._discovered_aliases:
             return False
-        if URL(current).scheme == "https" and (
-            URL(self._discovered_url).scheme != "https"
-        ):
+        if URL(current).scheme == "https" and URL(discovered_url).scheme != "https":
             return False
         try:
             async with asyncio.timeout(CURRENT_URL_CHECK_TIMEOUT):
@@ -376,7 +378,9 @@ class VacuulaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             address_changed = (
                 entry.data.get(CONF_URL) != self._discovered_url
                 and bool(set(entry.data.get("robot_ids", [])) & set(robot_ids))
-                and await self._async_follow_discovered_url(entry, robot_ids)
+                and await self._async_follow_discovered_url(
+                    entry, self._discovered_url, robot_ids
+                )
             )
             self._remember_aliases(entry, self._discovered_aliases, robot_ids)
             if address_changed:

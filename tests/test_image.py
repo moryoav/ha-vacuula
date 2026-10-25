@@ -79,7 +79,7 @@ async def test_image_entity(hass):
     assert await entity.async_image()
     client.async_map.assert_awaited_once()
     assert entity.image_last_updated is not None
-    entity._fetched = -1000
+    entity._stale = True
     client.async_map.side_effect = CannotConnect("offline")
     assert await entity.async_image() is None
     robot.maps = []

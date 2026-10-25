@@ -32,7 +32,7 @@ from custom_components.vacuula.client import (
 from custom_components.vacuula.const import DOMAIN, GEN3, GEN4
 from custom_components.vacuula.coordinator import VacuulaCoordinator
 from custom_components.vacuula.data import RobotData
-from custom_components.vacuula.image import VacuulaMapImage
+from custom_components.vacuula.image import IMAGE_MAX_AGE, VacuulaMapImage
 from custom_components.vacuula.services import _resolve, async_setup_services
 
 
@@ -419,8 +419,10 @@ async def test_reconfigure_rejects_robots_owned_by_other_entry(hass):
     assert entry.data["url"] == "http://old.local:81"
 
 
-async def test_cached_image_expires_on_coordinator_update(resource_coordinator):
-    """Keep a fresh map image cached and rerender it after its expiration time."""
+async def test_cached_image_follows_map_changes_not_token_refreshes(
+    resource_coordinator,
+):
+    """Reuse a map image across token refreshes and reread it after map changes."""
     coordinator = resource_coordinator
     robot = RobotData("TEST-robot", "Neato", GEN3, True, maps=[{"id": "floor"}])
     coordinator.robots = {robot.serial: robot}
@@ -430,22 +432,32 @@ async def test_cached_image_expires_on_coordinator_update(resource_coordinator):
     )
     entity = VacuulaMapImage(coordinator, robot.serial, "floor")
     entity.hass = coordinator.hass
-    with (
-        patch("custom_components.vacuula.image.monotonic", return_value=1000),
-        patch.object(entity, "async_write_ha_state"),
-    ):
+    clock = patch("custom_components.vacuula.image.monotonic", return_value=1000)
+    with clock as now, patch.object(entity, "async_write_ha_state"):
         first_image = await entity.async_image()
+        first_updated = entity.image_last_updated
+        # Viewers fetch again after each five-minute token rotation.
+        now.return_value = 1000 + 30 * 60
         entity._handle_coordinator_update()
-        assert entity._image == first_image
-    with (
-        patch("custom_components.vacuula.image.monotonic", return_value=1300),
-        patch.object(entity, "async_write_ha_state"),
-    ):
+        assert await entity.async_image() == first_image
+        assert coordinator.client.async_map.await_count == 1
+        assert entity.image_last_updated == first_updated
+
+        # A changed map record makes the next fetch read the map again. An
+        # unchanged picture keeps its timestamp, so no new image is reported.
+        robot.maps = [{"id": "floor", "name": "Upstairs"}]
         entity._handle_coordinator_update()
-        assert entity._image is None
+        assert await entity.async_image() == first_image
+        assert coordinator.client.async_map.await_count == 2
+        assert entity.image_last_updated == first_updated
+
+        # Grid changes without a record change are picked up after an hour.
         coordinator.client.async_map.return_value["rle"] = [[1, 1]]
-        assert await entity.async_image() != first_image
-    assert coordinator.client.async_map.await_count == 2
+        now.return_value = 1000 + 30 * 60 + IMAGE_MAX_AGE
+        changed = await entity.async_image()
+        assert changed != first_image
+        assert coordinator.client.async_map.await_count == 3
+        assert entity.image_last_updated != first_updated
 
 
 @pytest.mark.parametrize(

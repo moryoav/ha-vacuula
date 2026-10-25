@@ -2,6 +2,7 @@
 
 import struct
 import zlib
+from copy import deepcopy
 from datetime import datetime
 from time import monotonic
 from typing import Any
@@ -26,6 +27,10 @@ from .entity import (
 PARALLEL_UPDATES = 0
 
 MAX_PIXELS = 4_194_304
+# Home Assistant rotates image tokens every five minutes, so viewers fetch the
+# image again. Serve those fetches from cache. A changed map record refreshes
+# it, and this age bound catches grid changes the map list does not show.
+IMAGE_MAX_AGE = 3600
 
 
 def _chunk(kind: bytes, value: bytes) -> bytes:
@@ -141,7 +146,10 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
         self._attr_unique_id = f"{serial}_map_{map_id}"
         self._image: bytes | None = None
         self._fetched = 0.0
+        self._stale = False
         self._updated: datetime | None = None
+        record = self._map_record()
+        self._record = deepcopy(record) if record is not None else None
         self._update_map_name()
 
     @property
@@ -149,70 +157,82 @@ class VacuulaMapImage(CoordinatorEntity[VacuulaCoordinator], ImageEntity):
         """Associate the map image with the existing robot device."""
         return DeviceInfo(identifiers={(DOMAIN, self.serial)})
 
+    def _map_record(self) -> dict[str, Any] | None:
+        """Return this map's record from the cached map list, if listed."""
+        return next(
+            (
+                m
+                for m in self.coordinator.robots[self.serial].maps
+                if str(m.get("id")) == self.map_id
+            ),
+            None,
+        )
+
     def _update_map_name(self) -> None:
         """Refresh the translated entity name from the current stored map name.
 
         While the map list is unknown (an upload in progress, a failed read or
         an unlisted robot) the last known name is kept.
         """
-        robot = self.coordinator.robots[self.serial]
-        name = next(
-            (
-                str(m.get("name") or "Floor")
-                for m in robot.maps
-                if str(m.get("id")) == self.map_id
-            ),
-            None,
-        )
-        if name is None:
+        record = self._map_record()
+        if record is None:
             if getattr(self, "_attr_translation_placeholders", None):
                 return
             name = "Floor"
+        else:
+            name = str(record.get("name") or "Floor")
         set_name_placeholders(self, {"map_name": name})
 
     @property
     def available(self) -> bool:
         """Require a successful update and a map still present in the cached list."""
-        return super().available and any(
-            str(m.get("id")) == self.map_id
-            for m in self.coordinator.robots[self.serial].maps
-        )
+        return super().available and self._map_record() is not None
 
     @property
     def image_last_updated(self) -> datetime | None:
-        """Return the last image fetch or cache-invalidation timestamp."""
+        """Return when a fetched map first produced its current picture."""
         return self._updated
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Remove deleted maps, follow renames and expire PNGs after five minutes."""
+        """Remove deleted maps, follow renames and notice changed map records."""
         robot = self.coordinator.robots[self.serial]
+        record = self._map_record()
         if (
             robot.listed
             and robot.capabilities.get("maps_available") is True
-            and not any(str(m.get("id")) == self.map_id for m in robot.maps)
+            and record is None
         ):
             # The server's map list was read and no longer has this map.
             async_remove_stale_entity(self, self.serial)
             return
         self._update_map_name()
-        if self._image is not None and monotonic() - self._fetched >= 300:
-            self._image = None
-            self._updated = dt_util.utcnow()
+        if record is not None:
+            if self._record is not None and record != self._record:
+                # The server changed this map; read its image again when asked.
+                self._stale = True
+            self._record = deepcopy(record)
         super()._handle_coordinator_update()
 
     async def async_image(self) -> bytes | None:
-        """Render a map off the event loop and cache its PNG for five minutes."""
+        """Render a map off the event loop and reuse it until the map changes."""
         if not self.available:
             return None
-        if self._image is not None and monotonic() - self._fetched < 300:
+        if (
+            self._image is not None
+            and not self._stale
+            and monotonic() - self._fetched < IMAGE_MAX_AGE
+        ):
             return self._image
         try:
             data = await self.coordinator.client.async_map(self.serial, self.map_id)
             image = await self.hass.async_add_executor_job(render_map, data)
         except VacuulaError, ValueError:
             return None
+        if image != self._image:
+            # Only a different picture is a new image for Home Assistant.
+            self._updated = dt_util.utcnow()
         self._image = image
         self._fetched = monotonic()
-        self._updated = dt_util.utcnow()
+        self._stale = False
         return image

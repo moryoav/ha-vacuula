@@ -387,7 +387,8 @@ schedules, map lists, and run lists are refreshed about every five minutes.
 Control commands read back state and only the setting or schedule they changed.
 Map changes refresh the map list. Read-only `get_data` calls return their
 requested resource without triggering other reads. Map PNGs are fetched on
-demand and cached for five minutes. Optional reads with transient errors,
+demand and reused until the map's record in the map list changes, or for at
+most an hour. Optional reads with transient errors,
 including 404 responses while idle, are retried on later detail polls; only
 explicit unsupported-command responses disable a query until reload.
 

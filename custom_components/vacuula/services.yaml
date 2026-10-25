@@ -1,222 +1,175 @@
 clean:
-  name: Clean a map or zone
-  description: Start a cleaning run with explicit settings. Automatically uses an active saved map while docked, otherwise starts whole-home cleaning without no-go boundaries. Choose Map to require mapped cleaning. Generation 3 supports one zone per action.
   fields:
     device_id: &device
-      name: Robot
       required: true
       selector:
         device:
           integration: vacuula
     map_id: &map
-      name: Map ID
       selector:
         text:
     cleaning_type:
-      name: Cleaning type
-      description: Auto uses an active map while docked and falls back to whole-home cleaning otherwise. Map requires a usable map and docked robot. Whole home ignores maps and no-go boundaries. An explicit map ID takes precedence over Auto or Map.
       default: auto
       selector:
         select:
-          options:
-            - label: Auto
-              value: auto
-            - label: Map
-              value: map
-            - label: Whole home
-              value: house
+          translation_key: cleaning_type
+          options: [auto, map, house]
     zone_ids:
-      name: Zone IDs
-      description: Boundary IDs from the selected map. Leave empty to clean the whole map.
       selector:
         object:
     mode:
-      name: Cleaning mode
       default: eco
       selector:
         select:
+          translation_key: cleaning_mode
           options: [eco, turbo, auto, max]
     navigation:
-      name: Navigation mode
       default: normal
       selector:
         select:
+          translation_key: navigation_mode
           options: [normal, extra_care, deep, gentle]
     nogo_enabled:
-      name: Respect no-go boundaries
       default: true
       selector:
         boolean:
 set_schedule:
-  name: Replace schedule
-  description: Replace all Generation 3 schedule events. Local times use Home Assistant's configured timezone and its current UTC offset. Rewrite the schedule after a daylight saving time change. This does not enable the schedule. An empty list removes all events.
   fields:
     device_id: *device
     events:
-      name: Events
       required: true
-      description: List of mode (1 eco, 2 turbo), day (0 Sunday to 6 Saturday), startTime (HH:MM), and optional boundaryId. A returned boundary object must contain its id and is converted to boundaryId. Missing or conflicting zone IDs are rejected. Times and weekdays use the selected time basis.
       selector:
         object:
     time_basis:
-      name: Time basis
-      description: Local uses Home Assistant's timezone. UTC preserves clock slots from get_data. Returned zone objects must contain a valid id before they can be written back.
       default: local
       selector:
         select:
+          translation_key: time_basis
           options: [local, utc]
 update_schedule_event:
-  name: Add or update schedule event
-  description: Add or update a Generation 4 schedule event. With an existing event ID, only supplied fields change and all other settings and zones are preserved. New events require enabled, days and time and default to eco, normal navigation and the promoted floorplan with no-go protection when available. Times use the robot's configured timezone.
   fields:
     device_id: *device
     event_id:
-      name: Existing event ID
-      description: Omit to create an event. Supply an existing ID to update selected fields from the robot's current event.
       selector:
         text:
     enabled:
-      name: Enabled
-      description: Required for a new event. Omit to preserve an existing value.
       selector:
         boolean:
     days:
-      name: Days
-      description: Required for a new event. Omit to preserve an existing value.
       selector:
         select:
+          translation_key: weekday
           multiple: true
           options: [mon, tue, wed, thu, fri, sat, sun]
     time:
-      name: Start time (HH:MM)
-      description: Required for a new event. Omit to preserve an existing value.
       selector:
         text:
     map_id: *map
     cleaning_type:
-      name: Cleaning type
-      description: Auto uses the promoted floorplan when available; for an existing event that targets a map it is rejected while no floorplan is promoted. Map requires one. Whole home removes zones and ignores no-go boundaries. Omit to preserve an existing target. The robot's current dock state does not affect future events.
       selector:
         select:
-          options:
-            - label: Auto
-              value: auto
-            - label: Map
-              value: map
-            - label: Whole home
-              value: house
+          translation_key: cleaning_type
+          options: [auto, map, house]
     zone_ids:
-      name: Zone IDs
-      description: Omit to preserve an existing zone selection. When changing to another floorplan, supply its zone IDs or an empty list to clean that whole floorplan.
       selector:
         object:
     mode:
-      name: Cleaning mode
       selector:
         select:
+          translation_key: cleaning_mode
           options: [eco, turbo, auto, max]
     navigation:
-      name: Navigation mode
       selector:
         select:
+          translation_key: navigation_mode
           options: [normal, gentle]
     nogo_enabled:
-      name: Respect no-go boundaries
       selector:
         boolean:
 delete_schedule_event:
-  name: Delete schedule event
-  description: Remove one Generation 4 schedule event.
   fields:
     device_id: *device
     event_id:
-      name: Event ID
       required: true
       selector:
         text:
 set_boundaries:
-  name: Replace map boundaries
-  description: Replace the complete boundary list on a map. An empty list removes all boundaries. Boundaries read with get_data can be written back unchanged; a missing Generation 3 relevancy is computed from the vertices. An active Generation 4 floorplan is promoted again to send the changes to the robot, and the schedule is re-read because the firmware may disable affected events. A failed promotion may leave no active floorplan; Automatic and mapped actions stay blocked until the floorplan is promoted again or demoted with the map action. Inactive maps stay inactive. Use get_data to read the current boundaries first.
   fields:
     device_id: *device
     map_id:
-      <<: *map
       required: true
+      selector:
+        text:
     boundaries:
-      name: Boundaries
       required: true
       selector:
         object:
 rename_robot:
-  name: Rename robot
-  description: Change the robot's name in Vacuula.
   fields:
     device_id: *device
     name:
-      name: New name
       required: true
       selector:
         text:
 update_map:
-  name: Update map
-  description: Change a map's name and Generation 3 enabled setting.
   fields:
     device_id: *device
     map_id:
-      <<: *map
       required: true
+      selector:
+        text:
     name:
-      name: Map name
       required: true
       selector:
         text:
     enabled:
-      name: Enabled
       required: true
       selector:
         boolean:
 map_action:
-  name: Manage floorplan
-  description: Promote, include, exclude or demote a Generation 4 map. Demote removes its active floorplan status. As in the Vacuula app, only a map marked with use can be promoted, and the active floorplan must be demoted before unuse.
   fields:
     device_id: *device
     map_id:
-      <<: *map
       required: true
+      selector:
+        text:
     action:
-      name: Action
       required: true
       selector:
         select:
+          translation_key: map_action
           options: [promote, use, unuse, demote]
     confirm_server_restarted:
-      name: Confirm Vacuula was restarted
-      description: Enable only after restarting the Vacuula server to end unknown map requests, when its restart cannot be detected automatically. This clears the request fence; promote or demote must still succeed to resolve recovery.
       selector:
         boolean:
 get_data:
-  name: Read robot data
-  description: Return structured robot data, maps, run history or boundaries for use in scripts. Generation 3 schedules use the robot's UTC clock. Requires a response variable.
   fields:
     device_id: *device
     resource:
-      name: Resource
       required: true
       selector:
         select:
-          options: [state, info, stats, preferences, schedule, maps, runs, map, run, boundaries, log_upload_state]
+          translation_key: data_resource
+          options:
+            - state
+            - info
+            - stats
+            - preferences
+            - schedule
+            - maps
+            - runs
+            - map
+            - run
+            - boundaries
+            - log_upload_state
     map_id: *map
     run_id:
-      name: Run ID
       selector:
         text:
 factory_reset:
-  name: Factory reset
-  description: Erase Generation 4 robot settings. The robot may need provisioning again. This action requires explicit confirmation.
   fields:
     device_id: *device
     confirm:
-      name: Confirm factory reset
       required: true
       default: false
       selector:

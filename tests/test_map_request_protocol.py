@@ -190,7 +190,7 @@ async def test_boot_identity_requires_the_exact_frontend_etag(etag, expected):
     assert await client.async_server_boot_id() == expected
     request = session.request.call_args
     assert request.args[0] == "GET"
-    assert request.args[1].raw_path == "/web"
+    assert request.args[1].raw_path == "/"
     assert request.kwargs["headers"] == {"Cache-Control": "no-cache"}
     assert request.kwargs["timeout"] is REQUEST_TIMEOUT
     assert request.kwargs["allow_redirects"] is False
@@ -221,3 +221,65 @@ async def test_boot_probe_transport_failure_is_unknown_without_retry(failure):
     response.__aenter__.side_effect = failure
     assert await client.async_server_boot_id() is None
     session.request.assert_called_once()
+
+
+async def test_legacy_boot_probe_uses_only_the_known_web_path():
+    """Ignore redirect ETags and read the legacy frontend on the configured origin."""
+    client, session, redirect = make_client(
+        status=301, headers={"Location": "/web", "ETag": '"111111111111"'}
+    )
+    _, _, frontend = make_client(
+        raw=b"PRIVATE_HTML", headers={"ETag": '"222222222222"'}
+    )
+    session.request.side_effect = [redirect, frontend]
+    assert await client.async_server_boot_id() == '"222222222222"'
+    assert [call.args[1].raw_path for call in session.request.call_args_list] == [
+        "/",
+        "/web",
+    ]
+    for call in session.request.call_args_list:
+        assert call.kwargs["allow_redirects"] is False
+        assert call.kwargs["headers"] == {"Cache-Control": "no-cache"}
+    redirect.__aexit__.assert_awaited_once()
+    frontend.__aexit__.assert_awaited_once()
+    frontend.content.iter_chunked.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "location",
+    ["https://other.test/web", "//other.test/web", "/api/server", "/web?x=1"],
+)
+async def test_boot_probe_rejects_other_redirect_locations(location):
+    """Never follow arbitrary redirects or infer a boot identity from their ETags."""
+    client, session, _ = make_client(
+        status=301, headers={"Location": location, "ETag": '"111111111111"'}
+    )
+    assert await client.async_server_boot_id() is None
+    session.request.assert_called_once()
+
+
+@pytest.mark.usefixtures("socket_enabled")
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_real_frontend_routes_report_changed_boot_tokens(legacy):
+    """Read actual 1.0 and 1.1 routes and observe a restart without reading HTML."""
+    boot = ['"111111111111"']
+    received = []
+
+    async def frontend(request):
+        """Serve each release's frontend route with its current process identity."""
+        received.append(request.path)
+        assert request.headers["Cache-Control"] == "no-cache"
+        if legacy and request.path == "/":
+            raise web.HTTPMovedPermanently(location="/web")
+        if request.path != ("/web" if legacy else "/"):
+            raise web.HTTPNotFound()
+        return web.Response(text="PRIVATE_HTML", headers={"ETag": boot[0]})
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", frontend)
+    async with TestServer(app) as server, aiohttp.ClientSession() as session:
+        client = VacuulaClient(session, str(server.make_url("/")))
+        assert await client.async_server_boot_id() == boot[0]
+        boot[0] = '"222222222222"'
+        assert await client.async_server_boot_id() == boot[0]
+    assert received == (["/", "/web"] if legacy else ["/"]) * 2

@@ -234,8 +234,12 @@ Generic HTTP errors, lost
 responses and cancellation retain it across entry reloads and prevent further
 map writes, Automatic or mapped starts and mapped schedule changes.
 
-After an ambiguous failure, an uncached `GET /web` reads the frontend's quoted
+After an ambiguous failure, an uncached `GET /` reads the frontend's quoted
 12-hex-character ETag, which the reviewed server creates once per process.
+On 1.0, the root's exact `301 Location: /web` permits a second request to the
+fixed `/web` path on the same origin. Other redirects remain unsupported, and
+redirect ETags never count as process identities. Vacuula 1.1 serves the root
+directly and redirects `/web` to it. Neither probe reads or retains HTML.
 Only a later changed token proves the old process ended. A pre-dispatch token
 would be unsafe if the server restarted before accepting the write, so it is
 never used as that baseline. If the token is unavailable, the administrator can

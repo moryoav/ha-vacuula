@@ -371,25 +371,34 @@ class VacuulaClient:
         """Read the frontend's per-process ETag without caching or reading its body.
 
         Vacuula generates a quoted 12-character hexadecimal token on startup.
-        Missing frontends, proxy responses and network failures leave the boot
-        identity unknown rather than manufacturing evidence of a restart.
+        Read the root frontend on 1.1, with a fixed /web fallback only for the
+        legacy root redirect. Missing frontends, proxy responses and network
+        failures leave the identity unknown rather than inventing a restart.
         """
         try:
-            async with self._session.request(
-                "GET",
-                URL(f"{self.base_url}/web", encoded=True),
-                headers={"Cache-Control": "no-cache"},
-                timeout=REQUEST_TIMEOUT,
-                allow_redirects=False,
-            ) as response:
-                if response.status != 200:
+            for path in ("/", "/web"):
+                async with self._session.request(
+                    "GET",
+                    URL(f"{self.base_url}{path}", encoded=True),
+                    headers={"Cache-Control": "no-cache"},
+                    timeout=REQUEST_TIMEOUT,
+                    allow_redirects=False,
+                ) as response:
+                    if (
+                        path == "/"
+                        and response.status == 301
+                        and response.headers.get("Location") == "/web"
+                    ):
+                        continue
+                    if response.status != 200:
+                        return None
+                    etag = response.headers.get("ETag")
+                    if isinstance(etag, str) and re.fullmatch(r'"[0-9a-f]{12}"', etag):
+                        return etag
                     return None
-                etag = response.headers.get("ETag")
-                if isinstance(etag, str) and re.fullmatch(r'"[0-9a-f]{12}"', etag):
-                    return etag
-                return None
         except aiohttp.ClientError, TimeoutError, OSError:
             return None
+        return None
 
     async def async_robots(self) -> dict[str, dict[str, Any]]:
         """Read robot metadata keyed by each server-side serial identifier."""

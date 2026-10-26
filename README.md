@@ -55,13 +55,15 @@ If you prefer to add the custom repository manually:
 
 #### Manual installation (alternative)
 
-Download this repository and copy:
+Download **vacuula.zip** from the [latest release](https://github.com/moryoav/ha-vacuula/releases/latest)
+and extract its contents into:
 
 ```text
-custom_components/vacuula
+/config/custom_components/vacuula
 ```
 
-to:
+The extracted `manifest.json` must be directly inside that folder. For a source
+installation, copy the repository's `custom_components/vacuula` folder to:
 
 ```text
 /config/custom_components/vacuula
@@ -507,6 +509,22 @@ See [local validation results](docs/local-validation.md) and
 [the quality assessment](docs/quality-scale.md) for outstanding release
 requirements. No command, schedule change,
 map edit, or factory reset is needed for read-only hardware validation.
+
+### Release archives
+
+Stable `vX.Y.Z` tags run the Python checks and Hassfest, then publish a GitHub
+release with **vacuula.zip**. The archive contains only the tagged integration
+files at its root, including artwork sources, licenses and attribution. HACS
+uses this asset; it does not offer the default branch as an installation version.
+
+The **Release** workflow also accepts an existing tag for packaging or checking
+an earlier release. It preserves existing release notes and refuses to replace
+an asset whose bytes differ. To build locally, choose an output directory
+outside the repository:
+
+```sh
+python tools/build_hacs_release.py v0.1.14 /tmp/vacuula-release
+```
 
 ## Artwork
 

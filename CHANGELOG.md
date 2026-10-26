@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added tagged `vacuula.zip` release assets, HACS ZIP installation metadata and a release workflow gated by the Python checks and Hassfest. Preserved artwork licenses and attribution in every archive.
+
 ## 0.1.14
 
 - Fixed Generation 3 schedule times on Vacuula 1.1 while preserving UTC schedules on 1.0. Converted local and UTC inputs to the correct robot clock, added a Robot time basis for raw schedule round trips, and rejected converted writes when clock metadata is unknown.

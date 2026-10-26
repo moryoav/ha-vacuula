@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag to package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  github-release:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Build the tagged HACS ZIP and release notes
+        run: python tools/build_hacs_release.py "$RELEASE_TAG" "$RUNNER_TEMP"
+
+      - name: Publish the release ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="$RUNNER_TEMP/vacuula.zip"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            release_api="repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
+            asset_id="$(gh api "$release_api" --jq '.assets[] | select(.name == "vacuula.zip") | .id')"
+            if [ -z "$asset_id" ]; then
+              gh release upload "$RELEASE_TAG" "$asset"
+            else
+              stored_digest="$(gh api "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" --jq '.digest')"
+              local_digest="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+              if [ "$stored_digest" != "$local_digest" ]; then
+                echo "Existing vacuula.zip does not match the tagged integration" >&2
+                exit 1
+              fi
+            fi
+          else
+            gh release create "$RELEASE_TAG" "$asset" \
+              --title "Vacuula ${RELEASE_TAG#v}" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --verify-tag
+          fi

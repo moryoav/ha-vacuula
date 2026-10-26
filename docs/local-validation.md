@@ -1,16 +1,16 @@
-# Local validation, 25 October 2026
+# Local validation, 26 October 2026
 
-Integration version: **0.1.13**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. The 0.1.13 changes were checked with tests, protocol fixtures and controlled failure sequences only; no live robot check was made for this release. Generation 4 remains source-verified without Gen4 hardware.
+Integration version: **0.1.14**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. Vacuula **1.1.0** was checked read-only with a connected D5. Schedule conversions and map recovery were checked with service fixtures and controlled failure sequences. Generation 4 remains source-verified without Gen4 hardware.
 
 ## Automated checks
 
-- **1,099 tests passed**, including 29 additional cases since the released 0.1.12 suite. These cover rediscovery of working, HTTPS, malformed and unreachable addresses, every Neato dustbin code, Vacuula's 504 robot timeout on Return to base, map image reuse, the setup menu for discovered servers and translated action texts, alongside the earlier protocol and recovery regressions.
-- **99.54% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.38%** and the discovery helper has **100%**.
+- **1,136 tests passed**, including 37 additional cases since the released 0.1.13 suite. These cover old and new Gen3 schedule clocks, beta version boundaries, UTC and differing local timezones, weekday rollover, raw schedule round trips, missing clock metadata, both frontend routes and changed server boot identifiers, alongside the earlier protocol and recovery regressions. Existing setup regressions now expect port 8050 while retaining port 80 discovery and configured addresses.
+- **99.50% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.38%** and the discovery helper has **100%**.
 - Strict mypy: **passed**, all 21 integration and tool modules.
-- **100% docstring coverage: 1,090/1,090 items in 80 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
+- **100% docstring coverage: 1,100/1,100 items in 81 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
-- Actionlint: **passed** for 0.1.12, GitHub workflow syntax and expressions validated. The workflow file is unchanged in 0.1.13.
+- Actionlint: **passed** for 0.1.12, GitHub workflow syntax and expressions validated. The workflow file is unchanged through 0.1.14.
 
 Run from the source folder on this development machine:
 
@@ -24,7 +24,29 @@ $TEST_PYTHON -m ruff check .
 $TEST_PYTHON -m ruff format --check .
 ```
 
-The installed test dependency versions are pinned in `requirements_test.txt`. Hassfest was run from the existing Home Assistant Core checkout with its development environment and an isolated Ruff 0.17.0 installation, matching the checkout's current requirement.
+The installed test dependency versions are pinned in `requirements_test.txt`. Official Hassfest passed in GitHub Actions using the pinned Home Assistant action and its official validator image.
+
+## Vacuula 1.1 compatibility, 0.1.14
+
+The server reported **1.1.0**, app port **8050**, timezone **Asia/Jerusalem**,
+and one connected Gen3 robot provisioned with installer **1.1.0**. Server and
+robot SSE streams, state, general information, preferences, schedule, map list
+and cleaning history reads succeeded. The D5 reported docked with 99% battery,
+`dustbin_missing`, no maps and two history records. Its schedule was disabled
+and empty. No schedule or movement command was sent for these checks.
+
+The updated client read a valid frontend boot identifier from `/` twice and
+confirmed it stayed stable. The old `/web` probe returned 301 and no identifier.
+Real local HTTP fixtures verified both the 1.0 root-to-`/web` redirect and the
+1.1 root frontend, including changed boot tokens. Gen4 recovery behavior was
+verified with simulated interrupted requests and restarts.
+
+Gen3 service fixtures verified that matching local 09:00 input stays 09:00 on
+1.1, while 1.0 keeps its existing UTC conversion. UTC input, different local
+zones, fractional offsets and weekly rollover preserve the intended instant
+using current offsets. Robot-basis round trips preserve raw clock slots and
+zone IDs without mutating read responses. Unknown clock metadata rejects
+converted writes, while raw robot input and empty replacements remain usable.
 
 ## Initial read-only hardware verification
 

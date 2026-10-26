@@ -22,7 +22,7 @@ These statuses are a development checklist, subject to independent review.
 | Lifecycle | Typed config-entry runtime data owns the coordinator. Setup performs a first refresh; unload removes the polling timer and cancels and awaits streams. |
 | Updates | Independent 60-second polling, server and per-robot event streams, five-minute optional detail/resource caches, targeted command readbacks, per-robot locks, and bounded reconnect backoff. Transient optional-read errors do not disable later polls. Robot connection follows the server's robot list, and only the server poll and event stream decide availability. |
 | Entities | Named controls plus optional scalar diagnostics for state, information, statistics, current and latest runs/subruns. Extra telemetry is read-only and disabled by default. Maps and schedule events dynamically add configuration switches that preserve existing names or commands, follow renames, and are removed when the record is deleted. |
-| Actions | Ten globally registered administrator actions, explicit schemas and generation checks, translated errors, safe mapped-cleaning defaults, atomic pause/dock and Gen4 boundary upload sequences, local-to-UTC Gen3 schedules, no raw command passthrough, and no automatic command retries. |
+| Actions | Ten globally registered administrator actions, explicit schemas and generation checks, translated errors, safe mapped-cleaning defaults, atomic pause/dock and Gen4 boundary upload sequences, version-aware Gen3 schedule clocks with local, UTC and raw robot inputs, no raw command passthrough, and no automatic command retries. |
 | Diagnostics | Cached allowlisted telemetry including reviewed details/meta fields; server URL, robot identities, maps, and complete schedule contents are excluded. No diagnostic network requests. |
 | Repairs | Persisted guards cover uncertain Gen4 floorplan uploads and boundary saves. Interrupted HTTP requests remain fenced because Vacuula handlers can outlive their callers. A later server process or explicit confirmation of an actual server restart ends that fence; map data alone cannot identify the completed writer. Upload uncertainty still requires a confirmed promotion or deliberate demotion. Recognized completed failures can reconcile against fresh map status, with stricter boundary confirmation. Offline promotions are refused before writes, and entry or robot removal clears its notices. Notices identify the robot and map ID. |
 | Documentation | README includes installation/removal, setup fields, entities, all actions, examples, data updates, supported generations, limitations, and troubleshooting. Protocol notes identify the reviewed API and validation limits. All Python definitions have docstrings, with 100% presence coverage enforced by a repository-wide AST audit in pytest and GitHub checks. |
@@ -34,10 +34,10 @@ The test environment pins **Home Assistant 2026.10.2**, Python 3.14, and
 `pytest-homeassistant-custom-component` in `requirements_test.txt`. Tests cover
 the client, config flow, coordinator, integration lifecycle, actions, images,
 diagnostics, and regression cases. The [local validation](local-validation.md)
-records 1,099 passing tests, 99.54% combined line and branch coverage, at least
+records 1,136 passing tests, 99.50% combined line and branch coverage, at least
 97.12% in every module, and 99.38% config-flow coverage. Strict mypy passes for
 all 19 integration modules and two tool modules, 21 checked modules in total.
-Docstring coverage is 100%, with 1,090 documented items across 80 Python files.
+Docstring coverage is 100%, with 1,100 documented items across 81 Python files.
 Local coverage rules are marked `done`.
 The strict-typing rule remains `todo` for separate client packaging and formal
 Core registration.

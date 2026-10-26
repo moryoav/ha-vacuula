@@ -7,8 +7,9 @@ Vacuula implementation code is not included.
 
 ## Evidence and compatibility
 
-The reference is the Vacuula source snapshot associated with revision `bf18585`,
-reviewed on 2026-10-19. Relevant files are `app/src/http.ts`,
+The references are Vacuula 1.0.0 revision `bf18585`, reviewed on 2026-10-19,
+and 1.1.0 revision `dadf239dccd6d5b0507481179fdf030949c0a36c`, compared on
+2026-10-26. Relevant files are `app/src/http.ts`,
 `app/src/http/gen3.ts`, `app/src/http/gen4.ts`, the app's generation-specific
 types, and `server/src/vacuula_server/handlers/{app,events,route_matcher}.py`.
 The [upstream project](https://github.com/vacuula/vacuula) remains the authority
@@ -21,6 +22,9 @@ robot; see the [local validation](local-validation.md).
 Generation 4 behavior is source-verified and fixture-tested, without hardware
 verification. Generation 3 multi-boundary cleaning was explicitly questioned in
 the app source; this integration accepts only a single `boundaryId`.
+Vacuula 1.1 reads and event streams were checked with a connected D5. The 1.1
+schedule conversion was verified with service fixtures, without schedule writes
+to that robot. The new frontend restart identifier was checked read-only.
 
 ## HTTP and events
 

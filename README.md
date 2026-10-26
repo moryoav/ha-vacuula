@@ -85,17 +85,20 @@ You can also open **Settings > Devices & services** and configure the discovered
    announcement. Already configured servers are excluded.
 2. To use a hostname, an HTTPS reverse proxy, or another server instead, choose
    **Enter an address** and enter its HTTP or HTTPS origin, for example
-   `http://vacuula.local`, or `http://vacuula.local:81` if you changed Vacuula's
-   app port from its default of 80. The hostname must resolve from Home
-   Assistant; use the server's LAN address if it does not.
+   `http://vacuula.local:8050` for Vacuula 1.1's default app port. Older servers
+   or existing installations may still use `http://vacuula.local` (port 80),
+   or a custom port such as `http://vacuula.local:81`. The hostname must resolve
+   from Home Assistant; use the server's LAN address if it does not.
 
 The **Server URL** field also appears directly when no new server is found, or
 a discovered address cannot be reached. This allows adding a second server or
 correcting an address advertised by a VPN or Docker host.
 Discovery needs local mDNS traffic to reach Home Assistant; isolated networks
-may require the manual address. Include the protocol, and the app port unless it
-is the default 80; omit `/web`, `/api`, ingress paths, credentials, query
-parameters, and fragments.
+may require the manual address. Include the protocol and the actual app port.
+HTTP port 80 and HTTPS port 443 can be omitted. Use the direct app port rather
+than the Gen3 robot port (335 by default), the Gen4 robot port or the separate
+HA ingress port. Omit `/web`, `/api`, ingress paths, credentials, query parameters,
+and fragments. Existing configured addresses are preserved.
 The direct API does not require authentication. Authenticated reverse proxies
 and redirects are not supported. Keep access to this API on a trusted network.
 

@@ -9,7 +9,7 @@
           "url": "Server URL"
         },
         "data_description": {
-          "url": "The HTTP or HTTPS address. Add the app port if Vacuula does not use its default port 80. Use the app's direct address, without /web or an ingress path."
+          "url": "The direct HTTP or HTTPS address, such as http://vacuula.local:8050 for Vacuula 1.1. Older installations may use port 80 or a custom app port. Omit /web and ingress paths."
         }
       },
       "discovered": {

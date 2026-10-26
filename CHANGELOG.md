@@ -4,6 +4,7 @@
 
 - Fixed Generation 3 schedule times on Vacuula 1.1 while preserving UTC schedules on 1.0. Converted local and UTC inputs to the correct robot clock, added a Robot time basis for raw schedule round trips, and rejected converted writes when clock metadata is unknown.
 - Restored automatic server restart detection for Generation 4 map recovery on Vacuula 1.1. Read the boot identifier from the new root frontend and retained the fixed legacy `/web` fallback for 1.0.
+- Updated the manual setup default and address guidance for Vacuula 1.1's port 8050. Preserved existing addresses, advertised ports and older servers using port 80.
 
 ## 0.1.13
 

@@ -373,7 +373,10 @@ async def test_discovered_servers_still_allow_a_manual_address(
     )
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "user"
-    assert next(iter(result["data_schema"].schema)).default() == "http://vacuula.local"
+    assert (
+        next(iter(result["data_schema"].schema)).default()
+        == "http://vacuula.local:8050"
+    )
     api.assert_not_called()
 
     with patch("custom_components.vacuula.async_setup_entry", return_value=True):

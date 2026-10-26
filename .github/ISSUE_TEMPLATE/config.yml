@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Support and troubleshooting
+    url: https://github.com/moryoav/ha-vacuula/blob/main/SUPPORT.md
+    about: Read the setup, compatibility and reporting guidance.
+  - name: Private security report
+    url: https://github.com/moryoav/ha-vacuula/security/advisories/new
+    about: Report a vulnerability without publishing sensitive details.
+  - name: Upstream Vacuula
+    url: https://github.com/vacuula/vacuula/issues
+    about: Report a server or installer problem that also occurs in the Vacuula app.

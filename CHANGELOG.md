@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added tagged `vacuula.zip` release assets, HACS ZIP installation metadata and a release workflow gated by the Python checks and Hassfest. Preserved artwork licenses and attribution in every archive.
+- Added contribution, support, security, conduct and accessibility policies, issue forms and a pull request template. Licensed the independent integration code under MIT while retaining the separate AGPL-3.0 artwork license and notices.
 
 ## 0.1.14
 

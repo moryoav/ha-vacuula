@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a reproducible problem with the Home Assistant integration.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        I can investigate more easily with the versions and reproduction steps below.
+        Remove credentials, private URLs, robot serial numbers and private map data.
+        Use the private security report link for a vulnerability.
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      description: Include the installed release or commit and installation method.
+    validations:
+      required: true
+  - type: input
+    id: home_assistant_version
+    attributes:
+      label: Home Assistant version
+    validations:
+      required: true
+  - type: input
+    id: vacuula_version
+    attributes:
+      label: Vacuula server and installer versions
+    validations:
+      required: true
+  - type: input
+    id: robot
+    attributes:
+      label: Robot model and generation
+      description: Include connection status, but omit the serial number.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Setup or discovery
+        - Robot controls or status
+        - Maps or boundaries
+        - Schedules or timezones
+        - Diagnostics or logs
+        - Accessibility
+        - Documentation or installation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected behavior and actual behavior
+      description: Include whether the same operation works in the Vacuula app.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs and diagnostics
+      description: Include only the relevant section after removing private information.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked existing issues for a similar report.
+          required: true
+        - label: I removed credentials, private addresses, robot identifiers and private map data.
+          required: true

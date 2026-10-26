@@ -530,3 +530,13 @@ python tools/build_hacs_release.py v0.1.14 /tmp/vacuula-release
 
 The integration includes the official Vacuula artwork in Home Assistant's local
 `brand/` format. See [artwork sources, licensing and reproduction](docs/branding/README.md).
+
+## Project policies and license
+
+I maintain this independent integration under the [MIT License](LICENSE).
+The Vacuula artwork keeps its separate upstream AGPL-3.0 license, source and
+attribution in `brand/`; the integration archive includes both sets of notices.
+
+See [support](SUPPORT.md), [contributing](CONTRIBUTING.md),
+[security reporting](SECURITY.md), the [code of conduct](CODE_OF_CONDUCT.md)
+and the [accessibility statement](ACCESSIBILITY.md).

@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an improvement to the Home Assistant integration.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: I welcome a clear description of the workflow you want to improve.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe the Home Assistant task or automation you want to improve.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Include the robot model, generation and server version when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and relevant details
+      description: Include current workarounds and any effect on robot commands, maps or schedules.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked existing issues for a similar request.
+          required: true
+        - label: I removed credentials, private addresses and robot identifiers.
+          required: true

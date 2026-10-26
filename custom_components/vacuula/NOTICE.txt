@@ -1,0 +1,11 @@
+ha-vacuula
+
+The independently written Home Assistant integration code is provided under
+the MIT License in LICENSE. Copyright (c) 2026 moryoav.
+
+The Vacuula artwork in brand/ is provided under its separate upstream GNU
+Affero General Public License version 3. Its source, complete license and
+attribution are included in brand/NOTICE.txt and brand/LICENSE-AGPL-3.0.txt.
+
+This independent, fan-made integration is not affiliated with or endorsed by
+the Vacuula team or Neato.

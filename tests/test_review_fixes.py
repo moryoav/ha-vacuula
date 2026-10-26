@@ -358,7 +358,7 @@ async def test_server_outage_reason_is_translated(hass):
 
 
 async def test_address_form_defaults_to_vacuula_default_port(hass):
-    """Offer the default Vacuula hostname without forcing an explicit port."""
+    """Offer the default Vacuula hostname with the current app port."""
     with patch(
         "custom_components.vacuula.config_flow.async_discover_servers",
         new=AsyncMock(return_value=[]),
@@ -368,7 +368,7 @@ async def test_address_form_defaults_to_vacuula_default_port(hass):
         )
     assert result["step_id"] == "user"
     marker = next(iter(result["data_schema"].schema))
-    assert marker.default() == "http://vacuula.local"
+    assert marker.default() == "http://vacuula.local:8050"
 
 
 async def test_servers_behind_one_proxy_address_stay_separate(hass):

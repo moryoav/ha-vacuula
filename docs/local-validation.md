@@ -1,16 +1,16 @@
 # Local validation, 26 October 2026
 
-Integration version: **0.1.14**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. Vacuula **1.1.0** was checked read-only with a connected D5. Schedule conversions and map recovery were checked with service fixtures and controlled failure sequences. Generation 4 remains source-verified without Gen4 hardware.
+Integration version: **0.1.15**. Runtime tested: **Home Assistant 2026.10.2**, Python **3.14.8** on Linux. The 0.1.15 changes cover release packaging, metadata and community files. Robot behavior checks below are carried forward from 0.1.14: Vacuula **1.1.0** was checked read-only with a connected D5, and schedule conversions and map recovery were checked with service fixtures and controlled failure sequences. Generation 4 remains source-verified without Gen4 hardware.
 
 ## Automated checks
 
-- **1,136 tests passed**, including 37 additional cases since the released 0.1.13 suite. These cover old and new Gen3 schedule clocks, beta version boundaries, UTC and differing local timezones, weekday rollover, raw schedule round trips, missing clock metadata, both frontend routes and changed server boot identifiers, alongside the earlier protocol and recovery regressions. Existing setup regressions now expect port 8050 while retaining port 80 discovery and configured addresses.
+- **1,146 tests passed**, including ten additional release packaging cases since 0.1.14. The suite covers tagged package contents, reproducible archives, invalid refs, output isolation, version mismatches and changelog extraction, alongside Gen3 schedule clocks, frontend restart identifiers, setup and the earlier protocol and recovery regressions.
 - **99.50% combined line and branch coverage** across all 19 integration modules. The lowest module is **97.12%**. Configuration flow coverage is **99.38%** and the discovery helper has **100%**.
-- Strict mypy: **passed**, all 21 integration and tool modules.
-- **100% docstring coverage: 1,100/1,100 items in 81 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
+- Strict mypy: **passed**, all 22 integration and tool modules.
+- **100% docstring coverage: 1,112/1,112 items in 83 Python files**, including integration code, tests, tools and the smoke script. The AST check requires nonempty docstrings for all modules, classes, functions and methods, including constructors, private helpers and nested callbacks.
 - Ruff lint and formatting: **passed** for all Python source, test and smoke-check files.
 - Official Hassfest: **passed**, one integration checked, zero invalid integrations. This includes manifest, translation, icons, service, quality-scale and discovery validation.
-- Actionlint: **passed** for 0.1.12, GitHub workflow syntax and expressions validated. The workflow file is unchanged through 0.1.14.
+- Actionlint **1.7.12: passed** for both the Checks and Release workflows, including reusable checks and tag/manual release triggers.
 
 Run from the source folder on this development machine:
 
@@ -25,6 +25,24 @@ $TEST_PYTHON -m ruff format --check .
 ```
 
 The installed test dependency versions are pinned in `requirements_test.txt`. Official Hassfest passed in GitHub Actions using the pinned Home Assistant action and its official validator image.
+
+## Release packaging and community files, 0.1.15
+
+Ten packaging cases use temporary Git repositories outside the source workspace.
+They verify tagged contents rather than working files, a flat integration root,
+preserved artwork notices, identical ZIP bytes across output directories, and
+rejection of invalid refs, in-workspace output, mismatched versions and missing
+release notes. Ruff, strict mypy and the full GitHub Python checks passed.
+
+The existing releases from **v0.1.8 through v0.1.14** received `vacuula.zip`
+assets built from their exact tags. Each uploaded asset's SHA-256 digest matched
+its local build. The archive includes the original SVG and the upstream AGPL
+artwork license and attribution. New tagged packages also include the MIT code
+license and a notice distinguishing the artwork's separate license.
+
+GitHub's community profile reported **100%**. The rendered page showed all eight
+checklist items with green Added checks and linked the accessibility statement.
+GitHub detected the MIT license, and private vulnerability reporting was enabled.
 
 ## Vacuula 1.1 compatibility, 0.1.14
 

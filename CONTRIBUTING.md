@@ -65,7 +65,7 @@ before publishing the tagged component as `vacuula.zip`.
 To check an existing tag locally, choose a directory outside the checkout:
 
 ```sh
-python tools/build_hacs_release.py v0.1.14 /tmp/vacuula-release
+python tools/build_hacs_release.py v0.1.15 /tmp/vacuula-release
 ```
 
 The builder uses committed tag contents, not working files. It preserves the

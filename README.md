@@ -523,7 +523,7 @@ an asset whose bytes differ. To build locally, choose an output directory
 outside the repository:
 
 ```sh
-python tools/build_hacs_release.py v0.1.14 /tmp/vacuula-release
+python tools/build_hacs_release.py v0.1.15 /tmp/vacuula-release
 ```
 
 ## Artwork

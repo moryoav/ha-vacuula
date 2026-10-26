@@ -34,10 +34,10 @@ The test environment pins **Home Assistant 2026.10.2**, Python 3.14, and
 `pytest-homeassistant-custom-component` in `requirements_test.txt`. Tests cover
 the client, config flow, coordinator, integration lifecycle, actions, images,
 diagnostics, and regression cases. The [local validation](local-validation.md)
-records 1,136 passing tests, 99.50% combined line and branch coverage, at least
+records 1,146 passing tests, 99.50% combined line and branch coverage, at least
 97.12% in every module, and 99.38% config-flow coverage. Strict mypy passes for
-all 19 integration modules and two tool modules, 21 checked modules in total.
-Docstring coverage is 100%, with 1,100 documented items across 81 Python files.
+all 19 integration modules and three tool modules, 22 checked modules in total.
+Docstring coverage is 100%, with 1,112 documented items across 83 Python files.
 Local coverage rules are marked `done`.
 The strict-typing rule remains `todo` for separate client packaging and formal
 Core registration.

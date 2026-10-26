@@ -60,8 +60,14 @@ def test_package_uses_the_tag_and_preserves_licenses(tagged_repo, tmp_path):
 
 
 def test_package_is_reproducible(tagged_repo, tmp_path):
-    """Produce the same archive bytes in different output directories."""
+    """Produce the same archive bytes despite different Git newline settings."""
+    subprocess.run(
+        ["git", "config", "core.autocrlf", "false"], cwd=tagged_repo, check=True
+    )
     first = release.build("v0.1.14", tmp_path / "first").read_bytes()
+    subprocess.run(
+        ["git", "config", "core.autocrlf", "true"], cwd=tagged_repo, check=True
+    )
     second = release.build("v0.1.14", tmp_path / "second").read_bytes()
     assert first == second
 

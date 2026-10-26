@@ -33,12 +33,16 @@ They verify tagged contents rather than working files, a flat integration root,
 preserved artwork notices, identical ZIP bytes across output directories, and
 rejection of invalid refs, in-workspace output, mismatched versions and missing
 release notes. Ruff, strict mypy and the full GitHub Python checks passed.
+The reproducibility case also changes Git's automatic newline conversion between
+builds. The builder explicitly uses LF so Windows and Linux builds match.
 
 The existing releases from **v0.1.8 through v0.1.14** received `vacuula.zip`
 assets built from their exact tags. Each uploaded asset's SHA-256 digest matched
 its local build. The archive includes the original SVG and the upstream AGPL
 artwork license and attribution. New tagged packages also include the MIT code
 license and a notice distinguishing the artwork's separate license.
+The backfilled assets retain their original Windows Git text line endings;
+their published bytes are preserved. The automated 0.1.15 archive uses LF.
 
 GitHub's community profile reported **100%**. The rendered page showed all eight
 checklist items with green Added checks and linked the accessibility statement.

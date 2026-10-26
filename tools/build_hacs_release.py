@@ -46,6 +46,10 @@ def build(tag: str, output_dir: Path) -> Path:
     result = subprocess.run(
         [
             "git",
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
             "archive",
             "--format=zip",
             f"refs/tags/{tag}",

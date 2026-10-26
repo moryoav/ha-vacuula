@@ -3,10 +3,12 @@
 import math
 from contextlib import suppress
 from copy import deepcopy
+from datetime import timedelta, tzinfo
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import probatio as vol
+from awesomeversion import AwesomeVersion, AwesomeVersionException
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import (
     HomeAssistant,
@@ -193,15 +195,15 @@ def _clean_command(
 
 
 def _gen3_schedule_events(
-    hass: HomeAssistant, data: dict[str, Any]
+    hass: HomeAssistant, data: dict[str, Any], server_info: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Convert local weekly clock slots to the robot's UTC clock.
+    """Translate weekly clock slots to the server version's Gen3 schedule clock.
 
-    Match Vacuula's current-offset conversion. Gen3 stores a fixed UTC weekly
-    schedule, so local times must be written again after a DST offset change.
+    Vacuula 1.1.0-b3 and later use the robot's local timezone; older versions
+    use UTC. Convert explicit local or UTC inputs with current timezone offsets.
+    The robot time basis preserves raw clock slots returned by get_data.
     Normalize a returned boundary object to the writable boundaryId. Never drop
     an unresolved or conflicting zone while replacing the complete schedule.
-    Explicit UTC input preserves the robot's clock slots.
     """
     events: list[dict[str, Any]] = [dict(event) for event in data["events"]]
     for event in events:
@@ -214,15 +216,40 @@ def _gen3_schedule_events(
             if "boundaryId" in event and event["boundaryId"] != boundary_id:
                 raise _error("invalid_schedule_boundary")
             event["boundaryId"] = boundary_id
-    if data["time_basis"] == "utc":
+    if not events or data["time_basis"] == "robot":
         return events
-    offset = dt_util.now(ZoneInfo(hass.config.time_zone)).utcoffset()
-    offset_minutes = int(offset.total_seconds() // 60) if offset else 0
+    version = server_info.get("version")
+    if not isinstance(version, str):
+        raise _error("schedule_clock_unknown")
+    try:
+        local_clock = AwesomeVersion(version) >= AwesomeVersion("1.1.0-b3")
+    except AwesomeVersionException as err:
+        raise _error("schedule_clock_unknown") from err
+    robot_timezone: tzinfo = dt_util.UTC
+    if local_clock:
+        timezone_name = server_info.get("timezone")
+        timezone = (
+            dt_util.get_time_zone(timezone_name)
+            if isinstance(timezone_name, str)
+            else None
+        )
+        if timezone is None:
+            raise _error("schedule_clock_unknown")
+        robot_timezone = timezone
+    input_timezone = (
+        ZoneInfo(hass.config.time_zone)
+        if data["time_basis"] == "local"
+        else dt_util.UTC
+    )
+    now = dt_util.utcnow()
+    input_offset = now.astimezone(input_timezone).utcoffset() or timedelta(0)
+    robot_offset = now.astimezone(robot_timezone).utcoffset() or timedelta(0)
+    offset_minutes = int((robot_offset - input_offset).total_seconds() // 60)
     for event in events:
         hour, minute = map(int, event["startTime"].split(":"))
-        day_shift, utc_minutes = divmod(hour * 60 + minute - offset_minutes, 24 * 60)
+        day_shift, clock_minutes = divmod(hour * 60 + minute + offset_minutes, 24 * 60)
         event["day"] = (event["day"] + day_shift) % 7
-        event["startTime"] = f"{utc_minutes // 60:02d}:{utc_minutes % 60:02d}"
+        event["startTime"] = f"{clock_minutes // 60:02d}:{clock_minutes % 60:02d}"
     return events
 
 
@@ -359,7 +386,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
         },
         "set_schedule": {
             vol.Required("events"): vol.All([_GEN3_EVENT], vol.Length(max=100)),
-            vol.Optional("time_basis", default="local"): vol.In(["local", "utc"]),
+            vol.Optional("time_basis", default="local"): vol.In(
+                ["local", "utc", "robot"]
+            ),
         },
         "update_schedule_event": {
             vol.Optional("event_id"): _IDENTIFIER,
@@ -448,7 +477,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     serial,
                     {
                         "cmd": "setSchedule",
-                        "params": {"events": _gen3_schedule_events(hass, data)},
+                        "params": {
+                            "events": _gen3_schedule_events(
+                                hass, data, coordinator.server_info
+                            )
+                        },
                     },
                 )
             elif action == "update_schedule_event":

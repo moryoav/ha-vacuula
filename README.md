@@ -264,11 +264,16 @@ events do not require the robot to be docked when the event is saved.
 
 Generation 3 schedule events contain `mode` (`1` eco, `2` turbo), `day` (`0`
 Sunday through `6` Saturday), `startTime` (`HH:MM`), and optional `boundaryId`.
-`set_schedule` interprets these times in Home Assistant's configured timezone
-and converts time and weekday to the robot's UTC clock. Use `time_basis: utc`
-when supplying raw UTC events, including events read by `get_data`. The robot
-stores fixed UTC weekly times: write a local-time schedule again after a DST
-offset change to keep the same local clock time, matching Vacuula's behavior.
+`set_schedule` interprets these times in Home Assistant's configured timezone.
+Vacuula 1.1.0-b3 and later use the robot's local timezone, reported by the server;
+older versions use UTC. The integration converts time and weekday between the
+input timezone and the robot's clock using current offsets. Use `time_basis: utc`
+for UTC input, or `time_basis: robot` to write raw events returned by `get_data`
+without changing their clock slots. On Vacuula 1.0, rewrite local-time schedules
+after a DST offset change. On 1.1, matching local timezones need no conversion;
+UTC inputs or different local timezones may need rewriting after offset changes.
+An unknown server version or timezone rejects converted writes; explicit robot
+clock input and clearing the schedule remain available.
 Returned events with a nested `boundary` object are accepted only when it has
 an explicit valid `id`; that ID becomes `boundaryId`. Missing or conflicting
 zone IDs reject the complete write before changing the schedule. The exact

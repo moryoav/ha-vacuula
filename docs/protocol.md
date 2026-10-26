@@ -159,11 +159,16 @@ uses a new nested snapshot so Home Assistant invalidates its serialized entry
 and saves every change. Entry minor version 2 migrates old `house` defaults to
 `auto`; new explicit mapless choices are preserved.
 
-Gen3 `setSchedule` stores UTC weekly times. The integration converts local
-inputs using Home Assistant's configured timezone and the current UTC offset,
-including weekday rollover, matching the app's `utils/clockTime.ts` behavior.
-`time_basis: utc` accepts raw events without conversion. `get_data` keeps raw
-UTC schedule responses. A DST offset change requires rewriting local schedules.
+Gen3 `setSchedule` uses UTC weekly slots before Vacuula 1.1.0-b3 and robot-local
+slots from 1.1.0-b3 onward. This switch is verified in upstream commit
+`871c3a20f992ef13113a9494fc847667f7b30fa5`, which removed the app's UTC conversion.
+Local input uses Home Assistant's timezone; UTC input uses UTC. Both convert to
+the target clock with current offsets, including weekday rollover. New servers
+must report a valid timezone. Unknown version or timezone metadata rejects
+converted writes rather than choosing an unverified clock. `time_basis: robot`
+preserves raw events returned by `get_data`, which are UTC on 1.0 and local on
+1.1. Clearing the schedule needs no clock metadata. Offset changes require
+rewriting legacy local schedules and converted schedules between different zones.
 The source's Gen3 `ScheduleEvent` type declares `boundaryId`, but its renderer
 reads `event.boundary.name`; no captured zone schedule establishes the robot's
 exact response. The integration accepts a nested boundary only with a valid

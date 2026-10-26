@@ -45,7 +45,7 @@ set_schedule:
       selector:
         select:
           translation_key: time_basis
-          options: [local, utc]
+          options: [local, utc, robot]
 update_schedule_event:
   fields:
     device_id: *device

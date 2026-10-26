@@ -19,6 +19,7 @@ from custom_components.vacuula.services import _resolve, async_setup_services
 def setup(hass):
     """Register advanced actions around a connected robot and observable mock I/O."""
     coordinator = MagicMock()
+    coordinator.server_info = {"version": "1.0.0"}
     coordinator.async_command = AsyncMock(
         return_value={"result": "ok", "data": {"value": 1}}
     )

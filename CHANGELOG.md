@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed Generation 3 schedule times on Vacuula 1.1 while preserving UTC schedules on 1.0. Converted local and UTC inputs to the correct robot clock, added a Robot time basis for raw schedule round trips, and rejected converted writes when clock metadata is unknown.
+
 ## 0.1.13
 
 - Kept a working server address when zeroconf rediscovers the server. The advertised hostname, an HTTPS reverse proxy and an address set with Reconfigure are no longer replaced with the plain-HTTP IP address. A missing, malformed or unreachable address is still updated, and HTTPS is never replaced with plain HTTP.

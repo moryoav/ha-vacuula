@@ -143,6 +143,9 @@
     },
     "confirmation_required": {
       "message": "Factory reset erases robot settings. Set confirm to true only when you intend to reset the robot."
+    },
+    "schedule_clock_unknown": {
+      "message": "The Gen3 schedule clock cannot be confirmed from the server version and timezone. Refresh data and try again. Use the Robot time basis only for raw events read from this robot."
     }
   },
   "issues": {
@@ -466,7 +469,8 @@
     "time_basis": {
       "options": {
         "local": "Local",
-        "utc": "UTC"
+        "utc": "UTC",
+        "robot": "Robot"
       }
     },
     "weekday": {
@@ -536,7 +540,7 @@
     },
     "set_schedule": {
       "name": "Replace schedule",
-      "description": "Replace all Generation 3 schedule events. Local times use Home Assistant's configured timezone and its current UTC offset. Rewrite the schedule after a daylight saving time change. This does not enable the schedule. An empty list removes all events.",
+      "description": "Replace all Generation 3 schedule events. Local input uses Home Assistant's timezone. Vacuula 1.1 uses the robot's local clock; 1.0 uses UTC. Conversion uses current timezone offsets. This does not enable the schedule. An empty list removes all events.",
       "fields": {
         "device_id": {
           "name": "Robot"
@@ -547,7 +551,7 @@
         },
         "time_basis": {
           "name": "Time basis",
-          "description": "Local uses Home Assistant's timezone. UTC preserves clock slots from get_data. Returned zone objects must contain a valid id before they can be written back."
+          "description": "Local uses Home Assistant's timezone. UTC uses UTC times. Robot preserves raw clock slots from get_data on every supported server version. Times are converted using current offsets; rewrite converted schedules after offset changes."
         }
       }
     },
@@ -674,7 +678,7 @@
     },
     "get_data": {
       "name": "Read robot data",
-      "description": "Return structured robot data, maps, run history or boundaries for use in scripts. Generation 3 schedules use the robot's UTC clock. Requires a response variable.",
+      "description": "Return structured robot data, maps, run history or boundaries for use in scripts. Generation 3 schedule times are raw robot clock slots: UTC on Vacuula 1.0 and local on 1.1. Use the Robot time basis to write them back. Requires a response variable.",
       "fields": {
         "device_id": {
           "name": "Robot"
